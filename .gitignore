@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.cache/
+data/mitre-cti/
+vector_dbs/
+.pytest_cache/
+trace_output.txt
+test_main_output.txt
+test_secondary_output.txt
+
