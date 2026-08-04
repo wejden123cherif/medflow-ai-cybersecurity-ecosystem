@@ -17,6 +17,7 @@ def run_step(name: str, command: list[str]) -> None:
 def main() -> None:
     steps = [
         ("Install Python packages", [PYTHON, "-m", "pip", "install", "-r", "requirements.txt"]),
+        ("Bootstrap external service directories", [PYTHON, "scripts/bootstrap_external_services.py"]),
         ("Download or update MITRE CTI", [PYTHON, "scripts/download_mitre.py"]),
         ("Build attack_db", [PYTHON, "scripts/build_attack_db.py"]),
         ("Build redteam_db", [PYTHON, "scripts/build_redteam_db.py"]),

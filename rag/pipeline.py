@@ -471,7 +471,10 @@ def _extract_mitre_id_set(text: str) -> set[str]:
 
 
 def _strip_think_blocks(response_text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", response_text or "", flags=re.DOTALL | re.IGNORECASE).strip()
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", response_text or "", flags=re.DOTALL | re.IGNORECASE)
+    # Also strip unclosed think blocks (model truncated before writing closing tag)
+    text = re.sub(r"<think\b[^>]*>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return text.strip()
 
 
 def _strip_model_sources_summary(response_text: str) -> str:
@@ -575,6 +578,7 @@ def generate_answer(system_prompt: str, question: str, context_docs: list[str], 
             {"role": "user", "content": user_message},
         ],
         temperature=0.2,
+        max_tokens=400,
     )
     
     answer = response.choices[0].message.content or ""
