@@ -1,0 +1,36 @@
+# ==============================================================
+# MedFlow AI — Suricata IDS Service (pcap replay mode)
+# ==============================================================
+# Run with: docker-compose up
+# Logs (eve.json) will be written to ./logs/ on the host.
+# ==============================================================
+
+services:
+  suricata:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medflow-suricata
+    restart: "no"
+
+    volumes:
+      - ./logs:/var/log/suricata
+      - ./rules:/etc/suricata/rules:ro
+      - ./pcap:/pcap:ro
+
+    environment:
+      - TZ=UTC
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
