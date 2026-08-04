@@ -130,6 +130,7 @@ services:
       - ./suricata/pcap:/pcap:ro
     environment:
       - TZ=UTC
+      - SURICATA_IFACE=${SURICATA_IFACE:-}
     depends_on:
       - wazuh.manager
 

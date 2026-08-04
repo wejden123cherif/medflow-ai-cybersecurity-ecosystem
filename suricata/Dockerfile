@@ -26,7 +26,9 @@ RUN mkdir -p /var/log/suricata /etc/suricata/rules
 
 COPY suricata.yaml /etc/suricata/suricata.yaml
 COPY rules/local.rules /etc/suricata/rules/local.rules
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 VOLUME ["/var/log/suricata"]
 
-ENTRYPOINT ["suricata", "-c", "/etc/suricata/suricata.yaml", "-i", "eth0", "--set", "vars.address-groups.HOME_NET=any", "-l", "/var/log/suricata/"]
+ENTRYPOINT ["/entrypoint.sh"]
