@@ -1,0 +1,173 @@
+# ===========================================================================
+# MedFlow AI — Response Playbook: SSH Brute Force
+# ===========================================================================
+#
+# MITRE ATT&CK Techniques Covered
+# ---------------------------------
+# T1110     — Brute Force (parent technique)
+# T1110.001 — Password Guessing
+# T1110.003 — Password Spraying
+#
+# Wazuh Rule IDs that trigger this playbook
+# ------------------------------------------
+# 5710 — SSH: Unknown user (failed login)
+# 5711 — SSH: Authentication failed
+# 5712 — SSHD brute force (multiple failures, same source IP)
+# 5763 — SSH: OpenSSH challenge-response login failed
+#
+# Why a separate playbook from credential_access.yaml?
+# ---------------------------------------------------
+# credential_access.yaml uses BLOCK_IP (drops ALL traffic from the attacker IP).
+# For SSH brute force specifically this is too broad:
+#
+#   • In hospital networks, multiple staff may share a NAT IP from a remote
+#     clinic or pharmacy partner. Blocking that IP entirely could cut off
+#     legitimate clinical staff.
+#   • BLOCK_SSH (iptables -p tcp --dport 22 -s <ip> -j DROP) surgically
+#     blocks only TCP/22. The attacker cannot retry SSH; legitimate staff
+#     on the same NAT can still reach the EHR on port 443/8443.
+#
+# This playbook is the primary handler for rule 5712 via Wazuh active-response.
+# The Wazuh active-response script (firewall-drop-ssh.sh) fires immediately
+# on detection without waiting for the LangGraph planning round-trip.
+# The MedFlow pipeline still picks it up for audit, escalation, and Tier 2+.
+#
+# Action reasoning by tier
+#   Tier 1: NOTIFY_SOC, LOG_EVENT, MONITOR_ACCOUNT, COLLECT_FORENSICS
+#           — zero operational side-effects, always execute.
+#   Tier 2: BLOCK_SSH, DROP_CONNECTION
+#           — BLOCK_SSH is port-scoped (only TCP/22); DROP_CONNECTION forces
+#             the current active session to be terminated via Suricata.
+#             Neither requires approval; both are reversible.
+#   Tier 2: RESET_MFA, REVOKE_SESSION (requires approval)
+#           — interrupts active clinical sessions; cannot be automated.
+#   Tier 3: ISOLATE_ENDPOINT (requires approval, restricted on High/Critical)
+#           — only if brute force succeeded and lateral movement is suspected.
+#   Tier 4: DISABLE_ACCOUNT (requires approval, restricted on Critical)
+#           — only if the targeted account is confirmed compromised.
+
+playbook_id: ssh_brute_force
+mitre_technique_id: T1110
+mitre_technique_name: "Brute Force — SSH (Password Guessing / Password Spraying)"
+
+applies_to_techniques:
+  - T1110
+  - T1110.001
+  - T1110.003
+
+# Wazuh rule group used for routing from custom-medflow.py integration
+wazuh_rule_groups:
+  - sshd
+  - authentication_failures
+
+# Wazuh rule IDs that map to this playbook (informational for documentation)
+wazuh_rule_ids:
+  - 5710
+  - 5711
+  - 5712
+  - 5763
+
+actions:
+
+  # ── Tier 1: Observational (always executed, no approval, no side-effects) ─────
+
+  - name: NOTIFY_SOC
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Immediate SOC notification on brute force detection.
+    # Fires even for single-source, low-volume attempts (rule 5710/5711)
+    # so analysts can correlate across agents before escalation to 5712.
+
+  - name: LOG_EVENT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Full forensic log entry: source IP, target asset, attempt count,
+    # Wazuh rule ID, timestamp. Stored in the incident audit trail.
+
+  - name: MONITOR_ACCOUNT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Heighten telemetry on the targeted user account.
+    # Increases alert sensitivity for successful logins, privilege use,
+    # and lateral movement for 48 hours post-detection.
+
+  - name: COLLECT_FORENSICS
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Capture /var/log/auth.log snapshot and active SSH session list
+    # to document the attack scope and evidence chain for investigation.
+
+  # ── Tier 2: Network containment (reversible, no approval required) ─────────────
+
+  - name: BLOCK_SSH
+    risk_tier: 2
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Port-scoped iptables block: -p tcp --dport 22 -s <attacker_ip> -j DROP
+    # Fires when Wazuh rule 5712 triggers (brute force threshold exceeded).
+    # Narrower than BLOCK_IP — only TCP/22 is blocked so clinicians on the
+    # same NAT gateway are not affected.
+    # Rule is reversible with: iptables -D INPUT -p tcp --dport 22 -s <ip> -j DROP
+
+  - name: DROP_CONNECTION
+    risk_tier: 2
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Forces the active attacker SSH session to terminate via Suricata drop rule.
+    # Complements BLOCK_SSH: BLOCK_SSH prevents future connections;
+    # DROP_CONNECTION kills the current in-progress session immediately.
+
+  # ── Tier 2: Identity controls (approval required — interrupts active sessions) ──
+
+  - name: RESET_MFA
+    risk_tier: 2
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: []
+    # Only applicable if the targeted account has MFA.
+    # Forces MFA re-enrollment to invalidate any stolen token.
+    # Requires approval: resetting during a clinical shift can lock out
+    # staff mid-procedure.
+
+  - name: REVOKE_SESSION
+    risk_tier: 2
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Terminates all active sessions for the brute-forced account.
+    # Restricted on Critical assets: the session may belong to a clinician
+    # actively managing a patient. Requires explicit human approval.
+
+  # ── Tier 3: Host containment (significant impact — human approval required) ────
+
+  - name: ISOLATE_ENDPOINT
+    risk_tier: 3
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["High", "Critical"]
+    # Full network isolation of the targeted host.
+    # Only warranted if brute force succeeded AND there are signs of
+    # lateral movement (e.g., new processes, outbound connections).
+    # High: cuts clinical documentation (paper fallback required).
+    # Critical: disrupts telemetry/dosing — direct patient-safety risk.
+
+  # ── Tier 4: Account termination (highest impact — always requires approval) ────
+
+  - name: DISABLE_ACCOUNT
+    risk_tier: 4
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Disables the targeted account entirely.
+    # Restricted on Critical assets where the account may be a shared
+    # service account used by life-support telemetry systems.

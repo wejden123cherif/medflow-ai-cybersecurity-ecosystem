@@ -1,0 +1,64 @@
+# ============================================================
+# MedFlow AI — Default Fallback Response Playbook
+# ============================================================
+#
+# Purpose
+# --------
+# This playbook is the safety net for any incident whose MITRE technique
+# does not match a specific playbook in the library.
+#
+# applies_to_techniques: []  — intentionally empty.  The loader's
+# playbook_for_technique() function returns this playbook whenever no
+# other playbook's applies_to_techniques list contains the queried ID.
+#
+# Design constraints (non-negotiable)
+# ------------------------------------
+# This playbook contains ONLY Tier 1 (observational) actions.
+# No network controls, no endpoint containment, no account actions.
+#
+# Rationale: When an incident's technique is unrecognised, we have no
+# validated clinical risk assessment for higher-tier actions on that
+# technique's typical target assets.  Allowing Tier 2+ actions without
+# a technique-specific playbook could result in automated isolation or
+# account disabling for techniques we have not yet evaluated in the
+# healthcare context.  Requiring human decision-making for anything
+# beyond observation is the correct default posture.
+#
+# SOC workflow when default playbook is returned
+# -----------------------------------------------
+# 1. System logs the event with NOTIFY_SOC, LOG_EVENT, CREATE_REPORT.
+# 2. SOC analyst reviews the technique ID and determines whether an
+#    existing specific playbook applies or whether a new playbook
+#    should be authored.
+# 3. Any active response beyond Tier 1 requires manual decision-making
+#    outside the automated pipeline until a proper playbook is created.
+
+mitre_technique_id: DEFAULT
+mitre_technique_name: "Default Fallback (No Technique Match)"
+applies_to_techniques: []
+
+actions:
+
+  - name: NOTIFY_SOC
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Alert SOC analysts immediately. Always the first step regardless
+    # of technique recognition status.
+
+  - name: LOG_EVENT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Forensic audit entry for the unrecognised technique event.
+    # Critical for post-incident analysis and future playbook authoring.
+
+  - name: CREATE_REPORT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Structured incident report so analysts have a documented record
+    # of the unrecognised technique for HIPAA tracking and triage.

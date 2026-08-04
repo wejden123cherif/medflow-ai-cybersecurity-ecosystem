@@ -1,0 +1,173 @@
+# ============================================================
+# MedFlow AI — Response Playbook: Ransomware / Impact (Category Playbook)
+# ===========================================================================
+#
+# MITRE ATT&CK Tactic: Impact
+#
+# Covered techniques (applies_to_techniques list)
+# ------------------------------------------------
+# T1486   — Data Encrypted for Impact (active encryption / ransomware)
+# T1490   — Inhibit System Recovery (shadow copy deletion, backup tampering)
+# T1489   — Service Stop (disabling AV/EDR/backup services pre-encryption)
+#
+# MATCHING LOGIC
+# ---------------
+# Exact-string-in-list matching only. No prefix or wildcard matching.
+# New ransomware-family techniques must be explicitly added here.
+#
+# Healthcare context & reasoning
+# --------------------------------
+# Ransomware against healthcare infrastructure is one of the highest-
+# impact threat scenarios, directly threatening patient safety.  The
+# well-known WannaCry and Ryuk campaigns caused hospital-wide outages,
+# delayed surgeries, and diverted ambulances.
+#
+# Key tensions in this playbook:
+#
+#   ISOLATE_ENDPOINT — The canonical containment action for ransomware.
+#   HOWEVER, on Critical patient-care assets (infusion pumps, ICU
+#   monitors, ventilators connected via network), isolation is a double-
+#   edged sword: it may halt the spread but simultaneously disconnects
+#   life-critical telemetry and automated dosing.  This playbook:
+#     • Keeps ISOLATE_ENDPOINT available for Critical assets (because
+#       containing active encryption is a life-safety issue too)
+#     • Marks it requires_approval=True AND lists "Critical" in
+#       asset_criticality_restrictions to signal it is NOT auto-eligible
+#       even with approval — the Phase 3 Planner must only surface this
+#       to a human who explicitly overrides the restriction.
+#
+#   DISABLE_ACCOUNT / KILL_PROCESS — Tier 4 actions that can stop
+#   ransomware propagation via compromised service accounts or active
+#   encryption processes.  Both require approval at all criticality
+#   levels; on Critical assets they are additionally restricted.
+#
+#   REVOKE_SESSION - Tier 2 because it is reversible and less disruptive
+#   than endpoint isolation or account disablement.  In healthcare, it is
+#   still not universally safe: if the target set includes a Critical
+#   patient-care asset, the session may belong to clinical staff or a
+#   service account tied to bedside/device workflows.  This playbook
+#   deliberately requires approval and restricts Critical assets so that
+#   session revocation on patient-care infrastructure is never automatic.
+#
+#   BLOCK_IP — Less effective against ransomware (lateral movement is
+#   often via SMB, not inbound connections) but useful when C2 traffic
+#   is identified.  Safe for all asset types.
+#
+# Risk tier summary
+#   Tier 1: NOTIFY_SOC, CREATE_REPORT, LOG_EVENT, COLLECT_FORENSICS
+#   Tier 2: BLOCK_IP, REVOKE_SESSION - Critical-asset approval required
+#   Tier 3: ISOLATE_ENDPOINT — restricted on Critical (see above)
+#   Tier 4: DISABLE_ACCOUNT, KILL_PROCESS — restricted on Critical
+
+mitre_technique_id: RANSOMWARE
+mitre_technique_name: "Impact — Ransomware and Recovery Inhibition"
+playbook_id: ransomware_impact
+playbook_version: v1
+applies_to_techniques:
+  # T1486 — active data encryption (ransomware payload)
+  - T1486
+  # T1490 — inhibit system recovery (shadow copy deletion, backup tampering)
+  - T1490
+  # T1489 — service stop (disabling AV, EDR, backup services pre-encryption)
+  - T1489
+
+actions:
+
+  - name: NOTIFY_SOC
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — immediate SOC notification is always the first action;
+    # no operational impact, no restriction.
+
+  - name: CREATE_REPORT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — creates a structured incident report for executive and
+    # regulatory stakeholders (HIPAA breach notification timeline starts here).
+
+  - name: LOG_EVENT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — forensic audit trail entry.
+
+  - name: COLLECT_FORENSICS
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — disk/memory snapshot before encryption progresses further.
+    # Critical for understanding the ransomware variant and restoring from
+    # clean backup.  No operational impact.
+
+  - name: BLOCK_IP
+    risk_tier: 2
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 2 — block known C2 or lateral-movement source IPs.
+    # Targets the attacker network path, not the clinical device itself.
+    # Always appropriate for ransomware containment.
+
+  - name: REVOKE_SESSION
+    risk_tier: 2
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Tier 2 — kills active sessions on the compromised account used to
+    # spread ransomware.  Requires approval on Critical assets because
+    # an active session may be a clinician mid-procedure or a service
+    # account supporting a patient-care device workflow.
+
+  - name: ISOLATE_ENDPOINT
+    risk_tier: 3
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Tier 3 — PRIMARY containment action for ransomware spread.
+    # "Critical" in asset_criticality_restrictions means the Phase 3
+    # Planner MUST NOT auto-propose this for Critical assets.  A human
+    # operator must explicitly acknowledge the patient-safety trade-off
+    # and override the restriction before this action appears in a
+    # response plan.
+    #
+    # DESIGN RATIONALE: Listing "Critical" here while also providing the
+    # action reflects real-world SOC decision-making — an analyst may
+    # choose to isolate even a life-critical device if the alternative is
+    # ransomware encrypting patient records across the entire network.
+    # The restriction ensures this decision is always deliberate, never
+    # automated.
+
+  - name: DISABLE_ACCOUNT
+    risk_tier: 4
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Tier 4 — disables the service/user account being abused by the
+    # ransomware operator.  On Critical assets a service account may
+    # control device authentication; requires explicit approval always.
+
+  - name: KILL_PROCESS
+    risk_tier: 4
+    requires_approval: true
+    reversible: false
+    asset_criticality_restrictions: ["High", "Critical"]
+    # Tier 4 — kills the active encryption process.
+    # Non-reversible: once killed, partially encrypted files remain
+    # partially encrypted.  On High (EHR servers) and Critical assets
+    # this may interrupt active transactions; restricted and requires
+    # approval.  On Low/Medium hosts it is the fastest containment.
+
+  - name: PATCH_SYSTEM
+    risk_tier: 3
+    requires_approval: true
+    reversible: false
+    asset_criticality_restrictions: ["Critical"]
+    # Tier 3 — emergency patch to close the exploited vulnerability.
+    # May require a restart; non-reversible from a process-state
+    # perspective.  Restricted on Critical assets due to restart risk.

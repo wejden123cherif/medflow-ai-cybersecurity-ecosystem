@@ -1,0 +1,154 @@
+# ============================================================
+# MedFlow AI — Response Playbook: Phishing (Category Playbook)
+# ===========================================================================
+#
+# MITRE ATT&CK Tactic: Initial Access
+#
+# Covered techniques (applies_to_techniques list)
+# ------------------------------------------------
+# T1566   — Phishing (parent technique)
+# T1566.001 — Spearphishing Attachment
+# T1566.002 — Spearphishing Link
+# T1566.003 — Spearphishing via Service (e.g. LinkedIn, Teams, Slack)
+#
+# MATCHING LOGIC
+# ---------------
+# Exact-string-in-list matching only. No prefix or wildcard matching.
+# New phishing sub-techniques must be explicitly added here.
+#
+# Healthcare context & reasoning
+# --------------------------------
+# Phishing is the leading initial-access vector in healthcare.
+# Clinicians are high-value targets because they have broad EHR access
+# and operate under time pressure that lowers phishing vigilance.
+#
+# Phishing-specific tensions:
+#
+#   QUARANTINE_EMAIL — the most targeted action for this technique.
+#   Safe for all asset types; it acts on the email system, not on the
+#   clinical device.  No approval needed for Low/Medium assets; for
+#   High/Critical assets we still allow it without approval because
+#   email quarantine does not disrupt clinical operations directly.
+#
+#   BLOCK_IP — blocks the phishing sender's infrastructure (SMTP relay
+#   IPs, payload delivery servers).  Tier 2, no restriction.
+#
+#   REVOKE_SESSION — if the user clicked the link and credentials were
+#   harvested, revoking active sessions stops lateral movement quickly.
+#   Tier 2; restricted on Critical assets (same reasoning as other
+#   playbooks — active clinical session risk).
+#
+#   DISABLE_ACCOUNT — only if the account is confirmed compromised and
+#   the attacker is actively using it.  Tier 4; restricted on Critical.
+#
+#   ISOLATE_ENDPOINT — if malware was delivered via the attachment and
+#   is already running.  Tier 3; restricted on High and Critical.
+#
+# Risk tier summary
+#   Tier 1: NOTIFY_SOC, LOG_EVENT, COLLECT_FORENSICS
+#   Tier 2: QUARANTINE_EMAIL, BLOCK_IP, RESET_MFA, REVOKE_SESSION
+#   Tier 3: ISOLATE_ENDPOINT — restricted on High/Critical
+#   Tier 4: DISABLE_ACCOUNT — restricted on Critical
+
+mitre_technique_id: PHISHING
+mitre_technique_name: "Initial Access — Phishing (All Sub-Techniques)"
+applies_to_techniques:
+  # Parent technique
+  - T1566
+  # T1566.001 — Spearphishing Attachment (malicious email attachment)
+  - T1566.001
+  # T1566.002 — Spearphishing Link (malicious URL in email)
+  - T1566.002
+  # T1566.003 — Spearphishing via Service (social media, Teams, Slack)
+  - T1566.003
+
+actions:
+
+  - name: NOTIFY_SOC
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — immediate alert to SOC. Always the first action.
+
+  - name: LOG_EVENT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — record phishing attempt details in the audit trail
+    # for HIPAA incident-tracking purposes.
+
+  - name: COLLECT_FORENSICS
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — capture email headers, attachment hash, and host memory
+    # state before any remediation alters the evidence.
+
+  - name: QUARANTINE_EMAIL
+    risk_tier: 2
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 2 — moves the suspicious email to quarantine.
+    # Acts on the mail system, not the clinical endpoint; safe for all
+    # asset types and does not interrupt clinical operations.
+    # No approval needed — this is the primary containment action for
+    # phishing and needs to be fast.
+
+  - name: BLOCK_IP
+    risk_tier: 2
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 2 — blocks the phishing sender's IP/domain infrastructure
+    # at the network perimeter.  Targets attacker, not clinical assets.
+
+  - name: RESET_MFA
+    risk_tier: 2
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 2 — if credentials were potentially harvested, forcing MFA
+    # reset invalidates stolen credential value.  Requires approval
+    # because it will interrupt the targeted user's current sessions.
+
+  - name: REVOKE_SESSION
+    risk_tier: 2
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Tier 2 — if the attacker is already using harvested credentials,
+    # session revocation is the fastest containment.
+    # Requires approval because it can interrupt active clinical sessions.
+    # Restricted on Critical assets: an active session on a Critical
+    # clinical system may belong to a clinician managing a patient.
+
+  - name: MONITOR_ACCOUNT
+    risk_tier: 1
+    requires_approval: false
+    reversible: true
+    asset_criticality_restrictions: []
+    # Tier 1 — heighten telemetry on the targeted user account to
+    # detect follow-on activity without disrupting clinical operations.
+
+  - name: ISOLATE_ENDPOINT
+    risk_tier: 3
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["High", "Critical"]
+    # Tier 3 — only appropriate if a malicious attachment has already
+    # executed and the endpoint is confirmed compromised.
+    # Restricted on High (EHR workstations) and Critical assets for
+    # the same patient-safety reasons as in other playbooks.
+
+  - name: DISABLE_ACCOUNT
+    risk_tier: 4
+    requires_approval: true
+    reversible: true
+    asset_criticality_restrictions: ["Critical"]
+    # Tier 4 — disable the compromised account entirely.
+    # Only warranted when credential theft is confirmed and active
+    # attacker use is ongoing.  Restricted on Critical assets.
