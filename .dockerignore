@@ -1,0 +1,41 @@
+# Git and editor files
+.git
+.gitignore
+.vscode
+.idea
+
+# Python environment and local virtualenv
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Secrets and env
+.env
+.env.*
+!.env.example
+
+# Local generated state and large datasets
+vector_dbs/
+.cache/
+logs/
+*.log
+
+# MITRE CTI data and local clones
+data/mitre-cti/
+mitre-cti/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Tests / docs not required in runtime image
+tests/
+README.md
+
+docs/
+
+# Keep source code but exclude caches
+**/__pycache__/

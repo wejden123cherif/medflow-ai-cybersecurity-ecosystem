@@ -1,109 +1,158 @@
-# MedFlow AI Cybersecurity Ecosystem
+﻿# MedFlow AI Cybersecurity Ecosystem
 
-AI-powered Red Team and Threat Intelligence lab for healthcare cybersecurity simulations.
+MedFlow is an AI-powered incident response platform that combines LangGraph, RAG, MITRE ATT&CK CTI, Wazuh integration, Suricata detection, and automated response execution.
 
-This project follows the setup from the provided presentation:
+## Deployment architecture
 
-- Red Team agent using MITRE ATT&CK knowledge.
-- Threat Intelligence agents for technique lookup, attribution, detection, and response.
-- Four local Chroma vector database folders: `attack_db`, `redteam_db`, `actor_db`, and `detection_db`.
-- Healthcare scenarios such as MFA fatigue, API abuse, phishing, ransomware staging, and smart-contract permission abuse.
-
-## Requirements
-
-- Python 3.10 or higher
-- Git
-- 16 GB RAM recommended
-- Groq API key for LLM answers
-
-## Quick Start
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-Add your Groq key to `.env`:
-
-```env
-GROQ_API_KEY=your_key_here
-```
-
-Download MITRE CTI data:
-
-```powershell
-python scripts/download_mitre.py
-```
-
-Build the four vector databases:
-
-```powershell
-python scripts/build_attack_db.py
-python scripts/build_redteam_db.py
-python scripts/build_actor_db.py
-python scripts/build_detection_db.py
-```
-
-Check setup status:
-
-```powershell
-python app.py status
-```
-
-Ask validation questions:
-
-```powershell
-python app.py ask --agent redteam "Give me a full kill chain for a Ryuk attack on a hospital."
-python app.py ask --agent detection "What SIEM rules detect MFA fatigue attacks against hospital portals?"
-python app.py ask --agent cti "What is T9999?"
-```
-
-Run raw similarity search without any LLM:
-
-```powershell
-python app.py search --db detection "MFA fatigue hospital portal"
-python -m rag.similarity_search --db redteam "Ryuk ransomware hospital kill chain"
-```
-
-Compare the configured main and secondary Groq models:
-
-```powershell
-python app.py compare --agent redteam "Give me a full kill chain for a Ryuk attack on a hospital."
-```
-
-## Project Layout
+The stack is intentionally split into separate services rather than putting everything in a single container.
 
 ```text
-data/
-  mitre-cti/           MITRE CTI repository clone
-.cache/
-  huggingface/         local embedding model cache
-vector_dbs/
-  attack_db/
-  redteam_db/
-  actor_db/
-  detection_db/
-agents/
-  redteam_agent.py
-  cti_agent.py
-  attribution_agent.py
-  detection_agent.py
-rag/
-  pipeline.py          shared RAG logic used by all agents
-  similarity_search.py raw ChromaDB search without Groq/LLM
-scripts/
-  download_mitre.py
-  build_attack_db.py
-  build_redteam_db.py
-  build_actor_db.py
-  build_detection_db.py
-app.py
-docs/
-  model_comparison.md
+Attacker VM (Hydra) --> Suricata IDS --> Wazuh Manager --> MedFlow app
+                                       |
+                                   Wazuh Indexer / Dashboard
+
+MedFlow app:
+  - FastAPI API (`api.py`)
+  - CLI (`app.py`)
+  - LangGraph investigation flow
+  - MITRE CTI + vector DB + RAG logic
+  - alert collection and response automation
 ```
 
-## Safety Note
+### Service layout
 
-This repository is designed for defensive education, authorized testing, and simulated healthcare cyber-range work. Red Team output should stay inside approved lab systems.
+- `medflow` container: the main Python app that investigates incidents, queries Wazuh, builds response plans, and serves the API.
+- `wazuh.manager` container: manager and API layer for Wazuh.
+- `wazuh.indexer` container: alert storage and search backend for Wazuh.
+- `wazuh.dashboard` container: Wazuh UI.
+- `suricata` container: IDS sensor that writes Suricata EVE logs into a mounted log directory.
+
+This is the best realistic SOC architecture for this project because Wazuh and Suricata are independent operational services with different responsibilities, data flows, and lifecycle needs.
+
+## Main entry points
+
+- `app.py` – CLI entry point for status checks, searches, and investigation runs.
+- `api.py` – FastAPI webhook service and health endpoint.
+- `graphs/threat_intel_graph.py` – incident response workflow orchestrator.
+- `config.py` – environment settings and persistent-data paths.
+
+## Operational requirements
+
+The project assumes:
+
+- Python 3.10+ at the host or in the app container
+- Git access for the MITRE CTI repo clone
+- a valid Groq API key
+- Docker and Docker Compose on the defender VM
+- a Wazuh-enabled alert ingestion path from Suricata into Wazuh
+
+## Required data and persistent storage
+
+The app expects persistent folders for:
+
+- `data/mitre-cti/` – MITRE CTI data download
+- `vector_dbs/` – generated Chroma databases
+- `.cache/` – embedding model cache
+- `suricata/logs/` – Suricata EVE output
+- `logs/` – app runtime logs
+
+These are persisted via Docker volumes and mounted paths in Compose.
+
+## Environment variables
+
+Copy `.env.example` to `.env` and populate it before starting the stack.
+
+Required values include:
+
+```env
+GROQ_API_KEY=your_key
+WAZUH_URL=https://wazuh.manager:55000
+WAZUH_USER=wazuh-wui
+WAZUH_PASSWORD=MyS3cr37P450r.*-
+WAZUH_INDEXER_URL=https://wazuh.indexer:9200
+WAZUH_INDEXER_USER=admin
+WAZUH_INDEXER_PASSWORD=SecretPassword
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@example.com
+SMTP_PASSWORD=your_password
+SMTP_FROM=medflow-ai-soc@gmail.com
+SOC_EMAIL=ops@example.com
+```
+
+## Quick start
+
+On a fresh Ubuntu VM:
+
+```bash
+git clone <repo-url>
+cd <repo-folder>
+cp .env.example .env
+# edit .env with your credentials and local values
+
+python scripts/bootstrap_external_services.py
+# this creates Suricata folders and clones wazuh-docker + misp-docker if missing
+
+docker compose up -d --build
+```
+
+Then verify:
+
+```bash
+docker compose ps
+curl http://localhost:8000/health
+curl -k https://localhost:56000
+curl -k https://localhost:9200
+```
+
+## Service lifecycle
+
+```bash
+docker compose up -d
+
+docker compose logs -f medflow
+docker compose logs -f wazuh.manager
+docker compose logs -f suricata
+
+docker compose down
+```
+
+## How MedFlow receives alerts
+
+1. Suricata detects suspicious traffic and writes `eve.json` into `suricata/logs`.
+2. The Wazuh manager is configured to ingest the Suricata JSON stream.
+3. MedFlow queries Wazuh via its collectors and normalizes the alerts into the incident graph.
+4. The LangGraph workflow correlates those alerts with MITRE ATT&CK, vector DB context, and possible response actions.
+5. Recommended response actions can be executed or staged through the MedFlow response layer.
+
+## Reproducible initialization
+
+The app startup script initializes data automatically when missing:
+
+- downloads the MITRE CTI repo if absent
+- builds the vector databases if absent
+- prints the project status
+- starts the API server
+
+This is handled by [docker/init-medflow.sh](docker/init-medflow.sh) and the Docker startup command.
+
+## Git hygiene
+
+The following must not be committed:
+
+- `.env`
+- `.venv/`
+- `data/mitre-cti/`
+- `vector_dbs/`
+- generated logs
+- cache files
+
+Repository content is kept to source code, Docker config, setup scripts, and docs.
+
+## Notes
+
+This architecture is suitable for a lab or SOC-style deployment. For a hardened production environment, add TLS certificates, network segmentation, secret rotation, and stronger IAM rules around the Wazuh stack and the MedFlow API.
+
+## Safety note
+
+This project is intended for defensive, authorized cybersecurity work and controlled lab environments.

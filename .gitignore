@@ -1,12 +1,54 @@
+# ─── Python runtime artifacts ───────────────────────────────────────────────
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ─── Environment & secrets ───────────────────────────────────────────────────
 .env
+# .env.example is intentionally NOT ignored — it documents required variables
+
+# ─── Local cache & temp files ────────────────────────────────────────────────
 .cache/
-data/mitre-cti/
-vector_dbs/
 .pytest_cache/
+.pytest_tmp/
+.pytest_tmp_run/
+logs/
+*.log
+*.out
+*.trace
+
+# ─── Test output artifacts (generated, not source) ───────────────────────────
 trace_output.txt
 test_main_output.txt
 test_secondary_output.txt
 
+# ─── Large downloaded data (re-creatable, not source code) ───────────────────
+# Full MITRE CTI STIX dump (~hundreds of MB). Re-clone with:
+#   git clone https://github.com/mitre/cti.git data/mitre-cti
+data/mitre-cti/
+
+# vector_dbs/ — ChromaDB/FAISS index files (regenerated at runtime)
+vector_dbs/
+
+# ─── External Docker repositories (keep their own upstream lifecycle) ────────
+# These are not part of the MedFlow Git repo; custom MedFlow config is extracted instead.
+wazuh-docker/
+misp-docker/
+wazuh-medflow-custom.patch
+
+# ─── OS and IDE artifacts ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ─── Agents / AI assistant internal files ────────────────────────────────────
+.agents/

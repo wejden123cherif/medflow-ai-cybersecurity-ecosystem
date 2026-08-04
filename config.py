@@ -34,6 +34,14 @@ class Settings:
     main_model: str
     secondary_model: str
     embedding_model: str
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str | None
+    smtp_password: str | None
+    smtp_from: str
+    soc_email: str
+    email_mode: str  # "gmail" for real delivery, "mock" for localhost:1025 CI fallback
+    protected_ips: list[str]
 
 
 def resolve_embedding_model(model_name: str) -> str:
@@ -49,11 +57,21 @@ def resolve_embedding_model(model_name: str) -> str:
 def load_settings() -> Settings:
     load_dotenv(ROOT_DIR / ".env")
     embedding_model = os.getenv("MEDFLOW_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
+    protected_ips_raw = os.getenv("PROTECTED_IPS", "127.0.0.1,::1,10.0.2.2,192.168.1.1")
+    protected_ips = [ip.strip() for ip in protected_ips_raw.split(",") if ip.strip()]
     return Settings(
         groq_api_key=os.getenv("GROQ_API_KEY") or None,
         main_model=os.getenv("GROQ_MAIN_MODEL", "qwen/qwen3-32b"),
         secondary_model=os.getenv("GROQ_SECONDARY_MODEL", "llama-3.1-8b-instant"),
         embedding_model=resolve_embedding_model(embedding_model),
+        smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")),
+        smtp_user=os.getenv("SMTP_USER") or None,
+        smtp_password=os.getenv("SMTP_PASSWORD") or None,
+        smtp_from=os.getenv("SMTP_FROM", "medflow-ai-soc@gmail.com"),
+        soc_email=os.getenv("SOC_EMAIL", "cherifwejden7@gmail.com"),
+        email_mode=os.getenv("EMAIL_MODE", "gmail"),
+        protected_ips=protected_ips,
     )
 
 

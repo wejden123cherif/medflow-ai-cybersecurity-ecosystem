@@ -1,0 +1,154 @@
+services:
+  medflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medflow-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MEDFLOW_ENV: ${MEDFLOW_ENV:-production}
+      PYTHONUNBUFFERED: "1"
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MAIN_MODEL: ${GROQ_MAIN_MODEL:-qwen/qwen3-32b}
+      GROQ_SECONDARY_MODEL: ${GROQ_SECONDARY_MODEL:-llama-3.1-8b-instant}
+      MEDFLOW_EMBEDDING_MODEL: ${MEDFLOW_EMBEDDING_MODEL:-BAAI/bge-base-en-v1.5}
+      WAZUH_URL: ${WAZUH_URL:-https://wazuh.manager:55000}
+      WAZUH_USER: ${WAZUH_USER:-wazuh-wui}
+      WAZUH_PASSWORD: ${WAZUH_PASSWORD:-MyS3cr37P450r.*-}
+      WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-https://wazuh.indexer:9200}
+      WAZUH_INDEXER_USER: ${WAZUH_INDEXER_USER:-admin}
+      WAZUH_INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecretPassword}
+    ports:
+      - "${MEDFLOW_PORT:-8000}:8000"
+    depends_on:
+      - wazuh.manager
+      - wazuh.indexer
+      - suricata
+    volumes:
+      - medflow_mitre_cti:/app/data/mitre-cti
+      - medflow_vector_dbs:/app/vector_dbs
+      - medflow_cache:/app/.cache
+      - medflow_logs:/app/logs
+    networks:
+      - medflow-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.12.0
+    hostname: wazuh.indexer
+    restart: unless-stopped
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - wazuh_indexer_data:/var/lib/wazuh-indexer
+    networks:
+      - medflow-net
+
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.12.0
+    hostname: wazuh.manager
+    restart: unless-stopped
+    depends_on:
+      - wazuh.indexer
+    environment:
+      - INDEXER_URL=https://wazuh.indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat.key
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    ports:
+      - "1514:1514"
+      - "1515:1515"
+      - "514:514/udp"
+      - "56000:55000"
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - ./wazuh/config/wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf
+      - ./wazuh/integrations:/var/ossec/integrations
+      - ./wazuh/active-response:/var/ossec/active-response/bin
+      - ./suricata/logs:/var/log/suricata:ro
+    networks:
+      - medflow-net
+
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.12.0
+    hostname: wazuh.dashboard
+    restart: unless-stopped
+    depends_on:
+      - wazuh.indexer
+      - wazuh.manager
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    ports:
+      - "8443:5601"
+    networks:
+      - medflow-net
+
+  suricata:
+    build:
+      context: ./suricata
+      dockerfile: Dockerfile
+    container_name: medflow-suricata
+    restart: unless-stopped
+    # Linux host/VM only. Docker Desktop on Windows/macOS does not support host networking
+    # in the same way, so this is intended for a real Linux deployment target.
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    privileged: true
+    volumes:
+      - ./suricata/logs:/var/log/suricata
+      - ./suricata/rules:/etc/suricata/rules:ro
+      - ./suricata/pcap:/pcap:ro
+    environment:
+      - TZ=UTC
+    depends_on:
+      - wazuh.manager
+
+volumes:
+  medflow_mitre_cti:
+  medflow_vector_dbs:
+  medflow_cache:
+  medflow_logs:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  wazuh_indexer_data:
+
+networks:
+  medflow-net:
+    driver: bridge
