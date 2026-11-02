@@ -57,6 +57,7 @@ class IncidentState(ThreatIntelState):
     approval_approver: str | None
     execution_results: list[dict] | None
     planner_divergence_flag: bool | None
+    response_dry_run: bool | None
 
     # Timelines
     detection_time: str | None

@@ -77,9 +77,21 @@ def risk_assessment_node(state: IncidentState) -> dict[str, Any]:
     )
 
     # 6. Return updated IncidentState fields
+    report = str(state.get("report") or "").rstrip()
+    if report:
+        report += (
+            "\n\n9. INCIDENT RISK ASSESSMENT\n"
+            f"Severity: {incident.severity}/15\n"
+            f"Asset criticality: {incident.asset_criticality}\n"
+            f"Incident confidence: {incident.confidence_score:.0%}\n"
+            f"Risk score: {risk_score}/100\n"
+            f"Priority: {priority}"
+        )
+
     return {
         "risk_score": risk_score,
         "priority": priority,
         "requires_human_review": requires_human_review,
+        "report": report,
         "audit_log": [entry.to_dict() for entry in incident.audit_log],
     }

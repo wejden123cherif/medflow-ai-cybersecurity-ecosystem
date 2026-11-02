@@ -143,8 +143,7 @@ def _timeline(state: ThreatIntelState) -> list[dict]:
     iocs_by_alert = {
         str(ioc.get("alert_id", "")): ioc
         for ioc in state.get("enriched_iocs", [])
-        if ioc.get("technique_confirmed")
-        and (not scoped_alert_ids or str(ioc.get("alert_id", "")) in scoped_alert_ids)
+        if not scoped_alert_ids or str(ioc.get("alert_id", "")) in scoped_alert_ids
     }
     seen: set[tuple] = set()
     rows = []
@@ -165,6 +164,7 @@ def _timeline(state: ThreatIntelState) -> list[dict]:
                 "destination": alert.get("destination", ""),
                 "event_type": alert.get("event_type", ""),
                 "technique": technique,
+                "evidence_status": str(ioc.get("evidence_status") or "uncertain"),
                 "actor": ioc.get("actor_name", "Unknown"),
                 "confidence": ioc.get("confidence", 0.0),
                 "actor_confidence": ioc.get("actor_confidence"),
@@ -196,7 +196,7 @@ def _format_attack_timeline_section(state: ThreatIntelState) -> str:
             risk_label = f"{int(row.get('risk_score') or 0)}/{row.get('risk_priority') or 'unknown'}"
         lines.append(
             f"- {row['timestamp']} | {row['source_ip']} -> {row['destination']} | "
-            f"{row['event_type']} | {row['technique']} | actor={row['actor']} | "
+            f"{row['event_type']} | {row['technique']} | evidence_status={row['evidence_status']} | actor={row['actor']} | "
             f"technique_confidence={float(row['confidence']):.0%} | "
             f"actor_confidence={float(row['actor_confidence'] or 0.0):.0%} | "
             f"risk={risk_label}"
@@ -234,9 +234,22 @@ def _format_threat_assessment_section(state: ThreatIntelState) -> str:
         name = context.get("name", technique_id)
         tactic = context.get("tactic", "Unknown")
         technique_lines.append(f"- {technique_id} ({name}) — tactic: {tactic}")
+    for index, technique_id in enumerate(techniques):
+        statuses = sorted(
+            {
+                str(ioc.get("evidence_status") or "uncertain")
+                for ioc in state.get("enriched_iocs", [])
+                if str(ioc.get("technique_confirmed", "")).upper() == str(technique_id).upper()
+                and (
+                    not set(campaign.get("correlated_alert_ids") or [])
+                    or str(ioc.get("alert_id", "")) in set(campaign.get("correlated_alert_ids") or [])
+                )
+            }
+        ) or ["uncertain"]
+        technique_lines[index] += f"; evidence_status={', '.join(statuses)}"
     technique_block = "\n".join(technique_lines) if technique_lines else "- None confirmed"
     return (
-        f"Confirmed techniques:\n{technique_block}\n"
+        f"ATT&CK techniques and evidence status:\n{technique_block}\n"
         f"Attributed actor: {actor} (campaign confidence {campaign_confidence:.0%}).\n"
         f"Actor evidence counts: {actor_evidence}.\n"
         f"Actor confidence evidence: {', '.join(actor_confidences) if actor_confidences else 'Unknown'}.\n"
@@ -259,6 +272,16 @@ def _format_current_attack_stage_section(state: ThreatIntelState) -> str:
     ]
     if reasoning:
         lines.append(f"Reasoning: {reasoning}")
+    scoped_ids = set(campaign.get("correlated_alert_ids") or [])
+    attempted = [
+        ioc for ioc in state.get("enriched_iocs", [])
+        if ioc.get("evidence_status") == "attempted"
+        and (not scoped_ids or str(ioc.get("alert_id", "")) in scoped_ids)
+    ]
+    if attempted:
+        lines.append(
+            "Evidence status: At least one event records attempted behavior; an attempt does not establish successful authentication or lateral movement."
+        )
     if is_live and confidence_score < 0.5:
         lines.append(
             "Guidance: Validate the alert chain before declaring an active incident, but preserve evidence and review affected hosts."

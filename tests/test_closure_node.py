@@ -118,3 +118,32 @@ def test_closure_node_no_action_required() -> None:
     res = closure_node(state)
 
     assert res["incident_status"] == "closed_no_remediation_required"
+
+
+def test_closure_response_time_uses_parsed_timestamps(monkeypatch):
+    monkeypatch.setattr("graphs.nodes.closure._utc_now_iso", lambda: "2026-07-28T10:02:00Z")
+    result = closure_node(_mock_state())
+
+    assert result["response_time"] == "2m 0.0s"
+
+
+def test_dry_run_closure_does_not_claim_containment_and_labels_report():
+    state = _mock_state(
+        response_dry_run=True,
+        proposed_actions=[{"action_type": "BLOCK_IP", "target": "198.51.100.10"}],
+        acknowledged_actions=[{"action_type": "BLOCK_IP", "target": "198.51.100.10"}],
+        executed_actions=[{"action_name": "BLOCK_IP", "target": "198.51.100.10", "status": "success"}],
+        execution_results=[{
+            "action_name": "BLOCK_IP",
+            "target": "198.51.100.10",
+            "execution_status": "success",
+            "details": "[DRY RUN] Would block IP.",
+        }],
+    )
+
+    result = closure_node(state)
+
+    assert result["incident_status"] == "dry_run_completed"
+    assert "Execution mode: DRY RUN" in result["report"]
+    assert "Executed in the environment: None (DRY RUN)" in result["report"]
+    assert "Dry-run simulations recorded: BLOCK_IP on 198.51.100.10" in result["report"]

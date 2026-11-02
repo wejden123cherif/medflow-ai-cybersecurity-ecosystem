@@ -24,6 +24,11 @@ from graphs.state import ThreatIntelState
 from graphs.text_utils import strip_model_thinking
 
 
+# Calibrated against the local BGE index: relevant T1486/T1490 descriptions
+# ranked 0.78-0.82; a clearly unrelated cafeteria/weather query ranked 0.52.
+MIN_TECHNIQUE_SIMILARITY = 0.75
+
+
 _MITRE_TOOL_CACHE: dict[str, str] = {}
 _MISP_PREFLIGHT_CACHE: dict[tuple[str, str, bool], tuple[bool, str]] = {}
 IOC_CACHE_DIR = ROOT_DIR / ".cache" / "ioc_enrichment"
@@ -398,6 +403,7 @@ def _fallback_ioc(
         "source_ip": alert.get("source_ip", ""),
         "technique_confirmed": technique,
         "technique_source": "inferred_from_wazuh",
+        "evidence_status": _evidence_status(alert),
         "actor_name": "Unattributed",
         "malware_associated": "Unknown",
         "confidence": max(0.0, min(1.0, float(technique_confidence or 0.0))),
@@ -451,12 +457,32 @@ def _structural_technique(alert: dict) -> str:
     if "port_scan" in event_type or "port_sweep" in event_type or "port scan" in event_type:
         return "T1046"
 
-    # --- Medical device access (Modbus / OT protocol) ---
+    # An unauthorized connection attempt to an OT/medical-device service does
+    # not establish exploitation. Only map T1210 when the alert itself carries
+    # explicit exploit/vulnerability evidence; otherwise leave it unclassified.
     if "medical_device" in groups_set:
-        return "T1210"  # Exploitation of Remote Services
+        exploit_evidence = " ".join((event_type, rule_desc, full_log)).lower()
+        if any(token in exploit_evidence for token in ("exploit", "cve-", "vulnerability", "remote code execution")):
+            return "T1210"  # Exploitation of Remote Services
+        return ""
 
-    # --- Lateral Movement via RDP ---
-    if "rdp" in groups_set:
+    # Failed RDP authentication is evidence of an attempted access, not proof
+    # that a remote session was established. Classify the attempt as brute
+    # force before considering lateral movement.
+    auth_failure = "authentication_failed" in groups_set or any(
+        token in " ".join((event_type, rule_desc, full_log))
+        for token in ("logon failure", "failed login", "authentication failure", "bad password")
+    )
+    if auth_failure and ("rdp" in groups_set or decoder == "windows_eventchannel"):
+        return "T1110"  # Brute Force attempt
+
+    # Only map RDP to lateral movement when evidence indicates successful
+    # authentication/session establishment.
+    auth_success = "authentication_success" in groups_set or any(
+        token in " ".join((event_type, rule_desc, full_log))
+        for token in ("successful login", "successful logon", "login successful", "logon successful", "session created")
+    )
+    if "rdp" in groups_set and auth_success:
         return "T1021.001"  # Remote Desktop Protocol
 
     # --- PowerShell execution ---
@@ -472,6 +498,36 @@ def _structural_technique(alert: dict) -> str:
         return "T1078"  # Valid Accounts
 
     return ""
+
+
+def _evidence_status(alert: dict) -> str:
+    """Describe whether alert text supports an attempt, confirmed activity, or uncertainty."""
+    text = " ".join(
+        str(alert.get(field, ""))
+        for field in ("event_type", "rule_description", "decoder", "raw_log", "full_log")
+    ).lower()
+    groups = {str(group).lower() for group in (alert.get("rule_groups") or [])}
+    if "authentication_failed" in groups or any(
+        token in text
+        for token in (
+            "logon failure", "failed login", "failed logon", "authentication failed",
+            "bad password", "failed password", '"status":"failed"',
+        )
+    ):
+        return "attempted"
+    if "authentication_success" in groups or any(
+        token in text
+        for token in (
+            "successful login", "successful logon", "login successful", "logon successful",
+            "accepted password", '"status":"success"', "session created",
+        )
+    ):
+        return "confirmed"
+    if any(token in text for token in ("connection attempt", "access attempt", "_attempt", " attempt")):
+        return "attempted"
+    if _structural_technique(alert):
+        return "confirmed"
+    return "uncertain"
 
 
 def _wazuh_rule_level(alert: dict) -> int:
@@ -625,7 +681,17 @@ def _candidate_technique(alert: dict, raw_alerts: list[dict] | None = None) -> t
     if _is_generic_fim_event(alert):
         return "", 0.0
 
-    # 1. Explicit hint wins unconditionally
+    groups = {str(group).lower() for group in (alert.get("rule_groups") or [])}
+    if "rdp" in groups and _evidence_status(alert) == "attempted":
+        # Explicit failure evidence takes precedence over a conflicting hint.
+        structural = _structural_technique(alert)
+        return (structural, 1.0) if structural == "T1110" else ("", 0.0)
+    if "medical_device" in groups:
+        # Do not accept an exploit label without supporting alert evidence.
+        structural = _structural_technique(alert)
+        return (structural, 1.0) if structural else ("", 0.0)
+
+    # 1. Use an explicit hint when it does not conflict with clear evidence.
     hint = _usable_technique_hint(alert)
     if hint:
         return hint, 1.0
@@ -657,6 +723,8 @@ def _candidate_technique(alert: dict, raw_alerts: list[dict] | None = None) -> t
         top_result = results[0]
         mitre_id = str(top_result.metadata.get("mitre_id", ""))
         similarity_score = max(0.0, min(1.0, float(top_result.similarity_percent or 0.0) / 100.0))
+        if similarity_score < MIN_TECHNIQUE_SIMILARITY:
+            return "", similarity_score
         return mitre_id, similarity_score
     except Exception as e:
         print(f"[IOC Enrichment] Semantic search failed: {e}")
@@ -734,8 +802,8 @@ def ioc_enrichment_node(state: ThreatIntelState) -> dict:
 
             candidate_technique, technique_similarity = _candidate_technique(alert, state.get("raw_alerts", []))
             
-            # Loud failure if no technique is returned or if similarity is below 50%
-            if not candidate_technique or technique_similarity < 0.50:
+            # Semantic fallback must clear the empirically calibrated threshold.
+            if not candidate_technique or technique_similarity < MIN_TECHNIQUE_SIMILARITY:
                 alert_id = alert.get("id", "unknown")
                 rule_id = alert.get("wazuh_rule_id", alert.get("rule_id", "unknown"))
                 event_type = alert.get("event_type", alert.get("rule_description", "unknown"))
@@ -746,6 +814,27 @@ def ioc_enrichment_node(state: ThreatIntelState) -> dict:
                 )
                 print(message)
                 errors.append(message)
+                # Keep relevant telemetry in campaign scope when the evidence
+                # does not justify a confirmed ATT&CK technique. An
+                # unauthorized medical-device connection attempt is relevant,
+                # but is not proof of remote-service exploitation.
+                if "medical_device" in {str(group).lower() for group in (alert.get("rule_groups") or [])}:
+                    enriched_iocs.append(
+                        {
+                            "alert_id": alert.get("id", "unknown"),
+                            "source_ip": alert.get("source_ip", ""),
+                            "technique_confirmed": "",
+                            "technique_source": "unclassified",
+                            "evidence_status": _evidence_status(alert),
+                            "actor_name": "Unattributed",
+                            "malware_associated": "Unknown",
+                            "confidence": 0.0,
+                            "technique_confidence": 0.0,
+                            "actor_confidence": 0.0,
+                            "summary": "Unauthorized medical-device access attempt; no exploit evidence was present.",
+                            "severity": alert.get("severity", ""),
+                        }
+                    )
                 continue
 
             cve_lookup_enabled = _should_enable_cve_lookup(alert)
@@ -755,6 +844,7 @@ def ioc_enrichment_node(state: ThreatIntelState) -> dict:
                 if isinstance(cached_ioc, dict) and _is_valid_cache_entry(cached_ioc):
                     enriched_ioc = deepcopy(cached_ioc)
                     enriched_ioc["cache_hit"] = True
+                    enriched_ioc["evidence_status"] = _evidence_status(alert)
                     print(
                         f"[IOC Enrichment] Reused persistent simulated cache for alert {alert['id']} "
                         f"({candidate_technique})"
@@ -778,6 +868,7 @@ def ioc_enrichment_node(state: ThreatIntelState) -> dict:
                 enriched_ioc = deepcopy(cached_ioc)
                 enriched_ioc["alert_id"] = alert["id"]
                 enriched_ioc["severity"] = alert["severity"]
+                enriched_ioc["evidence_status"] = _evidence_status(alert)
                 print(
                     f"[IOC Enrichment] Reused cached enrichment for alert {alert['id']} "
                     f"({candidate_technique}, {alert.get('source_ip', 'unknown')})"
@@ -864,6 +955,7 @@ Respond with ONLY valid JSON in this exact schema:
                 "source_ip": alert["source_ip"],
                 "technique_confirmed": candidate_technique,
                 "technique_source": "provided_hint" if _usable_technique_hint(alert) else "inferred_from_wazuh",
+                "evidence_status": _evidence_status(alert),
                 "actor_name": actor_name,
                 "malware_associated": malware_associated,
                 "confidence": technique_confidence,

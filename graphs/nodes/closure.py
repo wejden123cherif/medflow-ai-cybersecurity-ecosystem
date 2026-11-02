@@ -45,6 +45,53 @@ def _parse_iso_datetime(dt_str: str | None) -> datetime | None:
         return None
 
 
+def _response_report_appendix(state: IncidentState) -> str:
+    report = str(state.get("report") or "").rstrip()
+    if not report:
+        return report
+
+    def labels(actions: list[dict[str, Any]]) -> str:
+        return ", ".join(
+            f"{action.get('action_type') or action.get('action_name') or action.get('action')} on {action.get('target') or 'unspecified target'}"
+            for action in actions
+        ) or "None"
+
+    proposed = list(state.get("proposed_actions") or [])
+    acknowledged = list(state.get("acknowledged_actions") or [])
+    approved = list(state.get("approved_actions") or [])
+    rejected = list(state.get("rejected_actions") or [])
+    results = list(state.get("execution_results") or [])
+    is_dry_run = bool(state.get("response_dry_run", False))
+    succeeded = [item for item in results if item.get("execution_status", item.get("status")) == "success"]
+    skipped = [item for item in results if item.get("execution_status", item.get("status")) == "skipped"]
+    failed = [item for item in results if item.get("execution_status", item.get("status")) == "failed"]
+
+    if is_dry_run:
+        outcomes = (
+            "Executed in the environment: None (DRY RUN).\n"
+            f"Dry-run simulations recorded: {labels(succeeded)}\n"
+            f"Skipped: {labels(skipped)}\n"
+            f"Failed: {labels(failed)}\n"
+            "No external connector was called and no system was changed."
+        )
+    else:
+        outcomes = (
+            f"Execution successes: {labels(succeeded)}\n"
+            f"Skipped: {labels(skipped)}\n"
+            f"Failed: {labels(failed)}"
+        )
+
+    return (
+        f"{report}\n\n10. RESPONSE ACTION STATUS\n"
+        f"Execution mode: {'DRY RUN' if is_dry_run else 'LIVE'}\n"
+        f"Proposed: {labels(proposed)}\n"
+        f"Acknowledged: {labels(acknowledged)}\n"
+        f"Approved: {labels(approved)}\n"
+        f"Rejected: {labels(rejected)}\n"
+        f"{outcomes}"
+    )
+
+
 def closure_node(state: IncidentState) -> dict[str, Any]:
     """
     LangGraph node for closing incidents and computing timeline/MTTR metrics.
@@ -96,7 +143,10 @@ def closure_node(state: IncidentState) -> dict[str, Any]:
     total_executed = len(executed_actions)
     total_failed = len(failed_actions)
 
-    if total_executed > 0 and total_failed == 0:
+    dry_run = bool(state.get("response_dry_run", False))
+    if dry_run:
+        final_status = "dry_run_completed"
+    elif total_executed > 0 and total_failed == 0:
         final_status = "contained"
     elif total_executed > 0 and total_failed > 0:
         final_status = "partially_contained"
@@ -108,11 +158,12 @@ def closure_node(state: IncidentState) -> dict[str, Any]:
     # 4. Update Audit Trail via Incident model
     try:
         incident = Incident.from_state(state)
+        action_count_label = "simulated" if dry_run else "succeeded"
         justification = (
             f"Incident closed with status '{final_status}'. "
             f"Metrics: detection={detection_time_str}, closure={closure_time}, "
             f"response_time={response_time_str} ({delta_seconds:.2f}s). "
-            f"Execution summary: {total_executed} succeeded, {total_failed} failed."
+            f"Execution summary: {total_executed} {action_count_label}, {total_failed} failed."
         )
         incident.add_audit_entry(
             actor="system:closure_node",
@@ -140,6 +191,7 @@ def closure_node(state: IncidentState) -> dict[str, Any]:
         "investigation_time": investigation_time_str,
         "response_time": response_time_str,
         "audit_log": audit_log_dicts,
+        "report": _response_report_appendix(state),
     }
 
     # 5. Persist final incident state to SQLite store

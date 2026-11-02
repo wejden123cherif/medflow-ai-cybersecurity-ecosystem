@@ -143,6 +143,12 @@ def _host_key(alert: dict) -> set[str]:
         value = str(alert.get(field, "") or "").strip().lower()
         if value and value not in GENERIC_HOSTNAMES:
             keys.add(f"{field}:{value}")
+            # The same endpoint address can be reported as an alert's source
+            # on one sensor and as another alert's Wazuh agent IP. Preserve
+            # field-specific keys above, while also linking those two views
+            # of the same endpoint.
+            if field in {"source_ip", "agent_ip"}:
+                keys.add(f"endpoint_ip:{value}")
     return keys
 
 

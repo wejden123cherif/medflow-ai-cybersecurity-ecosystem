@@ -49,3 +49,33 @@ def test_correlation_time_window_constraint():
     assert len(selected_iocs) == 1
     assert len(metadata["excluded_alerts"]) == 1
     assert metadata["excluded_alerts"][0]["reason"] == "outside_correlation_window_or_host_scope"
+
+
+def test_correlation_links_source_ip_to_same_endpoint_agent_ip():
+    alerts = [
+        {
+            "id": "INITIAL-ACCESS",
+            "timestamp": "2026-06-24T08:19:08Z",
+            "source_ip": "185.220.101.45",
+            "destination": "medflow-portal",
+            "agent_name": "medflow-portal",
+            "agent_ip": "10.20.14.23",
+        },
+        {
+            "id": "INTERNAL-PIVOT",
+            "timestamp": "2026-06-24T08:31:44Z",
+            "source_ip": "10.20.14.23",
+            "destination": "10.20.0.0/16",
+            "agent_name": "medflow-ids",
+            "agent_ip": "10.20.2.15",
+        },
+    ]
+    iocs = [
+        {"alert_id": alert["id"], "source_ip": alert["source_ip"], "technique_confirmed": "T1078"}
+        for alert in alerts
+    ]
+
+    selected_alerts, selected_iocs, _ = _select_campaign_scope(alerts, iocs)
+
+    assert {alert["id"] for alert in selected_alerts} == {"INITIAL-ACCESS", "INTERNAL-PIVOT"}
+    assert {ioc["alert_id"] for ioc in selected_iocs} == {"INITIAL-ACCESS", "INTERNAL-PIVOT"}

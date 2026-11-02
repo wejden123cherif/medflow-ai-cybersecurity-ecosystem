@@ -48,6 +48,7 @@ def test_wazuh_live_risk_computation() -> None:
         "affected_assets": ["ehr_database_server"],
         "affected_asset_type": "ehr",
         "potential_patient_impact": "High clinical risk",
+        "report": "Incident report",
     }
 
     result = risk_assessment_node(state)
@@ -55,6 +56,8 @@ def test_wazuh_live_risk_computation() -> None:
     assert result["risk_score"] == 78
     assert result["priority"] == "High"
     assert result["requires_human_review"] is False
+    assert "Risk score: 78/100" in result["report"]
+    assert "Priority: High" in result["report"]
     
     # Verify audit log entry
     audit_log = result["audit_log"]
