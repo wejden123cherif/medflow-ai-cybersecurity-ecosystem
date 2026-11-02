@@ -60,8 +60,8 @@ def test_valid_playbook_loads() -> None:
 
     assert data["mitre_technique_id"] == "CREDENTIAL_ACCESS"
     assert isinstance(data["applies_to_techniques"], list)
-    assert "T1110" in data["applies_to_techniques"]
-    assert "T1110.001" in data["applies_to_techniques"]
+    assert "T1110.002" in data["applies_to_techniques"]
+    assert "T1555" in data["applies_to_techniques"]
     assert isinstance(data["actions"], list)
     assert len(data["actions"]) > 0
 
@@ -278,7 +278,10 @@ def test_known_technique_resolves_to_correct_playbook() -> None:
     """
     playbooks = load_all_playbooks(PLAYBOOKS_DIR)
 
-    result_cred = playbook_for_technique("T1110", playbooks)
+    result_ssh = playbook_for_technique("T1110", playbooks)
+    assert result_ssh["mitre_technique_id"] == "T1110"
+
+    result_cred = playbook_for_technique("T1555", playbooks)
     assert result_cred["mitre_technique_id"] == "CREDENTIAL_ACCESS"
 
     result_ransomware = playbook_for_technique("T1486", playbooks)

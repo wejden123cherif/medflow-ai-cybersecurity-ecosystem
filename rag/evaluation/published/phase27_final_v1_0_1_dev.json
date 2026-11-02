@@ -1,0 +1,2103 @@
+{
+  "generated_at_utc": "2026-11-02T13:48:35.664591+00:00",
+  "dataset_version": "1.0.1",
+  "label": "phase27_final",
+  "split": "dev",
+  "embedding_model": "BAAI/bge-base-en-v1.5@a5beb1e3e68b9ab74eb54cfd186867f64f240e1a (local cache path omitted)",
+  "similarity_threshold": 0.62,
+  "top_k": 3,
+  "metric_notes": {
+    "recall_at_k": "Relevant ATT&CK IDs hit in raw top-k / all expected IDs; technique and actor entity cases are ID-weighted.",
+    "precision_at_3": "Relevant IDs in the raw top three / (3 * positive query count); empty slots count as non-relevant.",
+    "accepted_precision_at_3": "Relevant IDs in threshold-accepted top three / (3 * positive query count); empty slots count as non-relevant.",
+    "mrr": "Mean reciprocal rank of first expected ID among positive queries.",
+    "ood_rejection_rate": "OOD cases with no accepted result / OOD cases.",
+    "ood_false_positive_query_rate": "OOD cases with at least one accepted result / OOD cases.",
+    "latency": "Per-query local search wall time including client/model initialization; first query may be cold."
+  },
+  "collection_metrics": {
+    "attack_db": {
+      "queries": 29,
+      "positive_queries": 23,
+      "ood_queries": 6,
+      "expected_relevant_technique_count": 27,
+      "expected_relevant_entity_count": 0,
+      "expected_relevant_item_count": 27,
+      "recall_at_1": 0.5185185185185185,
+      "recall_at_3": 0.8518518518518519,
+      "accepted_recall_at_1": 0.5185185185185185,
+      "accepted_recall_at_3": 0.8518518518518519,
+      "precision_at_3": 0.3333333333333333,
+      "accepted_precision_at_3": 0.3333333333333333,
+      "mrr": 0.7608695652173914,
+      "ood_rejection_rate": 1.0,
+      "ood_false_positive_query_rate": 0.0,
+      "empty_result_rate": 0.20689655172413793,
+      "mean_latency_ms": 764.8644793103688,
+      "latency_denominator_queries": 29
+    },
+    "redteam_db": {
+      "queries": 24,
+      "positive_queries": 23,
+      "ood_queries": 1,
+      "expected_relevant_technique_count": 27,
+      "expected_relevant_entity_count": 0,
+      "expected_relevant_item_count": 27,
+      "recall_at_1": 0.5555555555555556,
+      "recall_at_3": 0.8148148148148148,
+      "accepted_recall_at_1": 0.5555555555555556,
+      "accepted_recall_at_3": 0.7777777777777778,
+      "precision_at_3": 0.3188405797101449,
+      "accepted_precision_at_3": 0.30434782608695654,
+      "mrr": 0.782608695652174,
+      "ood_rejection_rate": 1.0,
+      "ood_false_positive_query_rate": 0.0,
+      "empty_result_rate": 0.041666666666666664,
+      "mean_latency_ms": 218.55587500003062,
+      "latency_denominator_queries": 24
+    },
+    "detection_db": {
+      "queries": 24,
+      "positive_queries": 23,
+      "ood_queries": 1,
+      "expected_relevant_technique_count": 27,
+      "expected_relevant_entity_count": 0,
+      "expected_relevant_item_count": 27,
+      "recall_at_1": 0.4444444444444444,
+      "recall_at_3": 0.7037037037037037,
+      "accepted_recall_at_1": 0.4444444444444444,
+      "accepted_recall_at_3": 0.7037037037037037,
+      "precision_at_3": 0.2753623188405797,
+      "accepted_precision_at_3": 0.2753623188405797,
+      "mrr": 0.6521739130434784,
+      "ood_rejection_rate": 1.0,
+      "ood_false_positive_query_rate": 0.0,
+      "empty_result_rate": 0.041666666666666664,
+      "mean_latency_ms": 220.18433750001046,
+      "latency_denominator_queries": 24
+    },
+    "actor_db": {
+      "queries": 1,
+      "positive_queries": 1,
+      "ood_queries": 0,
+      "expected_relevant_technique_count": 0,
+      "expected_relevant_entity_count": 1,
+      "expected_relevant_item_count": 1,
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "accepted_recall_at_1": 1.0,
+      "accepted_recall_at_3": 1.0,
+      "precision_at_3": 0.3333333333333333,
+      "accepted_precision_at_3": 0.3333333333333333,
+      "mrr": 1.0,
+      "ood_rejection_rate": null,
+      "ood_false_positive_query_rate": null,
+      "empty_result_rate": 0.0,
+      "mean_latency_ms": 360.9625999997661,
+      "latency_denominator_queries": 1
+    }
+  },
+  "aggregate_metrics": {
+    "queries": 78,
+    "positive_queries": 70,
+    "ood_queries": 8,
+    "expected_relevant_technique_count": 81,
+    "expected_relevant_entity_count": 1,
+    "expected_relevant_item_count": 82,
+    "recall_at_1": 0.5121951219512195,
+    "recall_at_3": 0.7926829268292683,
+    "accepted_recall_at_1": 0.5121951219512195,
+    "accepted_recall_at_3": 0.7804878048780488,
+    "precision_at_3": 0.30952380952380953,
+    "accepted_precision_at_3": 0.3047619047619048,
+    "mrr": 0.7357142857142858,
+    "ood_rejection_rate": 1.0,
+    "ood_false_positive_query_rate": 0.0,
+    "empty_result_rate": 0.10256410256410256,
+    "mean_latency_ms": 423.99740512822365,
+    "latency_denominator_queries": 78
+  },
+  "threshold_sweep": {
+    "dev": {
+      "0.60": {
+        "collection_query_pairs": 78,
+        "positive_collection_query_pairs": 70,
+        "expected_relevant_item_count": 82,
+        "accepted_recall_at_3": 0.7926829268292683,
+        "ood_cases": 8,
+        "ood_rejection_rate": 0.625,
+        "ood_false_positive_query_rate": 0.375,
+        "empty_result_rate": 0.0641025641025641
+      },
+      "0.61": {
+        "collection_query_pairs": 78,
+        "positive_collection_query_pairs": 70,
+        "expected_relevant_item_count": 82,
+        "accepted_recall_at_3": 0.7926829268292683,
+        "ood_cases": 8,
+        "ood_rejection_rate": 0.875,
+        "ood_false_positive_query_rate": 0.125,
+        "empty_result_rate": 0.08974358974358974
+      },
+      "0.62": {
+        "collection_query_pairs": 78,
+        "positive_collection_query_pairs": 70,
+        "expected_relevant_item_count": 82,
+        "accepted_recall_at_3": 0.7804878048780488,
+        "ood_cases": 8,
+        "ood_rejection_rate": 1.0,
+        "ood_false_positive_query_rate": 0.0,
+        "empty_result_rate": 0.10256410256410256
+      },
+      "0.65": {
+        "collection_query_pairs": 78,
+        "positive_collection_query_pairs": 70,
+        "expected_relevant_item_count": 82,
+        "accepted_recall_at_3": 0.7073170731707317,
+        "ood_cases": 8,
+        "ood_rejection_rate": 1.0,
+        "ood_false_positive_query_rate": 0.0,
+        "empty_result_rate": 0.1794871794871795
+      },
+      "0.70": {
+        "collection_query_pairs": 78,
+        "positive_collection_query_pairs": 70,
+        "expected_relevant_item_count": 82,
+        "accepted_recall_at_3": 0.2682926829268293,
+        "ood_cases": 8,
+        "ood_rejection_rate": 1.0,
+        "ood_false_positive_query_rate": 0.0,
+        "empty_result_rate": 0.6282051282051282
+      },
+      "0.75": {
+        "collection_query_pairs": 78,
+        "positive_collection_query_pairs": 70,
+        "expected_relevant_item_count": 82,
+        "accepted_recall_at_3": 0.06097560975609756,
+        "ood_cases": 8,
+        "ood_rejection_rate": 1.0,
+        "ood_false_positive_query_rate": 0.0,
+        "empty_result_rate": 0.9358974358974359
+      }
+    },
+    "heldout": {
+      "0.60": {
+        "collection_query_pairs": 0,
+        "positive_collection_query_pairs": 0,
+        "expected_relevant_item_count": 0,
+        "accepted_recall_at_3": null,
+        "ood_cases": 0,
+        "ood_rejection_rate": null,
+        "ood_false_positive_query_rate": null,
+        "empty_result_rate": null
+      },
+      "0.61": {
+        "collection_query_pairs": 0,
+        "positive_collection_query_pairs": 0,
+        "expected_relevant_item_count": 0,
+        "accepted_recall_at_3": null,
+        "ood_cases": 0,
+        "ood_rejection_rate": null,
+        "ood_false_positive_query_rate": null,
+        "empty_result_rate": null
+      },
+      "0.62": {
+        "collection_query_pairs": 0,
+        "positive_collection_query_pairs": 0,
+        "expected_relevant_item_count": 0,
+        "accepted_recall_at_3": null,
+        "ood_cases": 0,
+        "ood_rejection_rate": null,
+        "ood_false_positive_query_rate": null,
+        "empty_result_rate": null
+      },
+      "0.65": {
+        "collection_query_pairs": 0,
+        "positive_collection_query_pairs": 0,
+        "expected_relevant_item_count": 0,
+        "accepted_recall_at_3": null,
+        "ood_cases": 0,
+        "ood_rejection_rate": null,
+        "ood_false_positive_query_rate": null,
+        "empty_result_rate": null
+      },
+      "0.70": {
+        "collection_query_pairs": 0,
+        "positive_collection_query_pairs": 0,
+        "expected_relevant_item_count": 0,
+        "accepted_recall_at_3": null,
+        "ood_cases": 0,
+        "ood_rejection_rate": null,
+        "ood_false_positive_query_rate": null,
+        "empty_result_rate": null
+      },
+      "0.75": {
+        "collection_query_pairs": 0,
+        "positive_collection_query_pairs": 0,
+        "expected_relevant_item_count": 0,
+        "accepted_recall_at_3": null,
+        "ood_cases": 0,
+        "ood_rejection_rate": null,
+        "ood_false_positive_query_rate": null,
+        "empty_result_rate": null
+      }
+    }
+  },
+  "queries": [
+    {
+      "id": "q01",
+      "split": "dev",
+      "query": "Encrypt files on compromised computers so the data cannot be used, as part of ransomware impact.",
+      "expected_technique_ids": [
+        "T1486"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Data Encrypted for Impact.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 16067.59379999994,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "T1560"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "T1560"
+          ],
+          "raw_scores_percent": [
+            67.62247085571289,
+            65.65542221069336,
+            62.4212384223938
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 352.4539999998524,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "T1560"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "T1560"
+          ],
+          "raw_scores_percent": [
+            67.78757572174072,
+            63.96777033805847,
+            63.314735889434814
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 413.8296999999511,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "M1041"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "M1041"
+          ],
+          "raw_scores_percent": [
+            67.70879626274109,
+            65.81657528877258,
+            64.21268582344055
+          ]
+        }
+      }
+    },
+    {
+      "id": "q02",
+      "split": "dev",
+      "query": "Delete shadow copies and backups to prevent recovery before deploying ransomware.",
+      "expected_technique_ids": [
+        "T1490"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Inhibit System Recovery.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 183.14509999981965,
+          "raw_ids": [
+            "T1490",
+            "T1070.004",
+            "T1679"
+          ],
+          "accepted_ids": [
+            "T1490",
+            "T1070.004",
+            "T1679"
+          ],
+          "raw_scores_percent": [
+            67.05887913703918,
+            64.23391103744507,
+            63.38333487510681
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 163.04290000016408,
+          "raw_ids": [
+            "T1490",
+            "T1679",
+            "T1070"
+          ],
+          "accepted_ids": [
+            "T1490"
+          ],
+          "raw_scores_percent": [
+            65.37729501724243,
+            61.83352470397949,
+            61.52184009552002
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 170.05779999999504,
+          "raw_ids": [
+            "T1490",
+            "T1679",
+            "T1561.001"
+          ],
+          "accepted_ids": [
+            "T1490",
+            "T1679",
+            "T1561.001"
+          ],
+          "raw_scores_percent": [
+            65.83353281021118,
+            63.30524682998657,
+            62.129032611846924
+          ]
+        }
+      }
+    },
+    {
+      "id": "q03",
+      "split": "dev",
+      "query": "Use stolen valid usernames and passwords to access an enterprise account.",
+      "expected_technique_ids": [
+        "T1078"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Valid Accounts.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 171.0624000002099,
+          "raw_ids": [
+            "T1078",
+            "T1087",
+            "T1078.003"
+          ],
+          "accepted_ids": [
+            "T1078",
+            "T1087",
+            "T1078.003"
+          ],
+          "raw_scores_percent": [
+            69.5163369178772,
+            65.77963829040527,
+            65.3346836566925
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 169.05429999997068,
+          "raw_ids": [
+            "T1078",
+            "T1114.002",
+            "T1087"
+          ],
+          "accepted_ids": [
+            "T1078",
+            "T1114.002",
+            "T1087"
+          ],
+          "raw_scores_percent": [
+            66.41775965690613,
+            64.69266414642334,
+            64.09578323364258
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 181.42959999977393,
+          "raw_ids": [
+            "T1078",
+            "T1087",
+            "T1033"
+          ],
+          "accepted_ids": [
+            "T1078",
+            "T1087",
+            "T1033"
+          ],
+          "raw_scores_percent": [
+            67.01031923294067,
+            65.57362675666809,
+            65.14739990234375
+          ]
+        }
+      }
+    },
+    {
+      "id": "q04",
+      "split": "dev",
+      "query": "Guess many passwords against a user account until one works.",
+      "expected_technique_ids": [
+        "T1110"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Brute Force.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 159.27300000021205,
+          "raw_ids": [
+            "T1110.001",
+            "T1110.003",
+            "T1555"
+          ],
+          "accepted_ids": [
+            "T1110.001",
+            "T1110.003",
+            "T1555"
+          ],
+          "raw_scores_percent": [
+            66.5086030960083,
+            62.83414363861084,
+            62.76514530181885
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 173.06619999999384,
+          "raw_ids": [
+            "T1110.001",
+            "T1110",
+            "T1201"
+          ],
+          "accepted_ids": [
+            "T1110.001"
+          ],
+          "raw_scores_percent": [
+            63.412195444107056,
+            61.65875196456909,
+            61.24557852745056
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 163.60580000036862,
+          "raw_ids": [
+            "T1110.001",
+            "T1110.003",
+            "T1110"
+          ],
+          "accepted_ids": [
+            "T1110.001",
+            "T1110.003",
+            "T1110"
+          ],
+          "raw_scores_percent": [
+            67.93060898780823,
+            64.19452428817749,
+            63.95898461341858
+          ]
+        }
+      }
+    },
+    {
+      "id": "q05",
+      "split": "dev",
+      "query": "Run PowerShell commands to execute malicious code on a Windows endpoint.",
+      "expected_technique_ids": [
+        "T1059.001"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of PowerShell command and scripting interpreter use.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 186.62250000033964,
+          "raw_ids": [
+            "T1059.001",
+            "T1569.002",
+            "T1202"
+          ],
+          "accepted_ids": [
+            "T1059.001",
+            "T1569.002",
+            "T1202"
+          ],
+          "raw_scores_percent": [
+            75.23927092552185,
+            69.17506456375122,
+            69.0230667591095
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 245.47860000029686,
+          "raw_ids": [
+            "T1059.001",
+            "T1569.002",
+            "T1202"
+          ],
+          "accepted_ids": [
+            "T1059.001",
+            "T1569.002",
+            "T1202"
+          ],
+          "raw_scores_percent": [
+            72.1210241317749,
+            67.72826910018921,
+            67.68795251846313
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 188.6174999999639,
+          "raw_ids": [
+            "T1059.001",
+            "T1202",
+            "M1038"
+          ],
+          "accepted_ids": [
+            "T1059.001",
+            "T1202",
+            "M1038"
+          ],
+          "raw_scores_percent": [
+            74.79439973831177,
+            69.19734477996826,
+            67.30269193649292
+          ]
+        }
+      }
+    },
+    {
+      "id": "q06",
+      "split": "dev",
+      "query": "Move laterally to another machine through the remote desktop protocol.",
+      "expected_technique_ids": [
+        "T1021.001"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Remote Desktop Protocol.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 191.47119999979623,
+          "raw_ids": [
+            "T1021.001",
+            "T1563.002",
+            "T1021"
+          ],
+          "accepted_ids": [
+            "T1021.001",
+            "T1563.002",
+            "T1021"
+          ],
+          "raw_scores_percent": [
+            72.8642225265503,
+            72.25739359855652,
+            69.49859857559204
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 176.301500000136,
+          "raw_ids": [
+            "T1563.002",
+            "T1021.001",
+            "T1570"
+          ],
+          "accepted_ids": [
+            "T1563.002",
+            "T1021.001",
+            "T1570"
+          ],
+          "raw_scores_percent": [
+            68.4960126876831,
+            66.60689115524292,
+            65.89891910552979
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 167.19689999990806,
+          "raw_ids": [
+            "T1219.002",
+            "T1563.002",
+            "T1021.001"
+          ],
+          "accepted_ids": [
+            "T1219.002",
+            "T1563.002",
+            "T1021.001"
+          ],
+          "raw_scores_percent": [
+            67.70787239074707,
+            65.50242304801941,
+            64.90907669067383
+          ]
+        }
+      }
+    },
+    {
+      "id": "q07",
+      "split": "dev",
+      "query": "Scan internal hosts and ports to discover reachable network services.",
+      "expected_technique_ids": [
+        "T1046"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Network Service Discovery.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 175.66080000005968,
+          "raw_ids": [
+            "T1046",
+            "T1018",
+            "T1016.001"
+          ],
+          "accepted_ids": [
+            "T1046",
+            "T1018",
+            "T1016.001"
+          ],
+          "raw_scores_percent": [
+            68.77511143684387,
+            67.80068874359131,
+            66.89343452453613
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 175.88210000030813,
+          "raw_ids": [
+            "T1046",
+            "T1018",
+            "T1049"
+          ],
+          "accepted_ids": [
+            "T1046",
+            "T1018",
+            "T1049"
+          ],
+          "raw_scores_percent": [
+            69.2359209060669,
+            66.25736355781555,
+            64.95737433433533
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 172.37819999991189,
+          "raw_ids": [
+            "T1046",
+            "T1018",
+            "T1016.001"
+          ],
+          "accepted_ids": [
+            "T1046",
+            "T1018",
+            "T1016.001"
+          ],
+          "raw_scores_percent": [
+            70.86392045021057,
+            68.43217611312866,
+            67.88866519927979
+          ]
+        }
+      }
+    },
+    {
+      "id": "q08",
+      "split": "dev",
+      "query": "Copy files from a compromised system to an attacker-controlled remote destination.",
+      "expected_technique_ids": [
+        "T1041",
+        "T1567"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Two technique families can describe network exfiltration, depending on channel.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 162.9934000002322,
+          "raw_ids": [
+            "T1105",
+            "T1092",
+            "T1080"
+          ],
+          "accepted_ids": [
+            "T1105",
+            "T1092",
+            "T1080"
+          ],
+          "raw_scores_percent": [
+            71.79354429244995,
+            70.81375122070312,
+            69.28371787071228
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 165.29179999997723,
+          "raw_ids": [
+            "T1105",
+            "T1570",
+            "T1092"
+          ],
+          "accepted_ids": [
+            "T1105",
+            "T1570",
+            "T1092"
+          ],
+          "raw_scores_percent": [
+            70.64581513404846,
+            69.70909833908081,
+            69.45071220397949
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 166.55339999988428,
+          "raw_ids": [
+            "T1092",
+            "T1080",
+            "T1105"
+          ],
+          "accepted_ids": [
+            "T1092",
+            "T1080",
+            "T1105"
+          ],
+          "raw_scores_percent": [
+            70.55025100708008,
+            70.44652104377747,
+            70.18890380859375
+          ]
+        }
+      }
+    },
+    {
+      "id": "q09",
+      "split": "dev",
+      "query": "Steal credentials from the Windows LSASS process memory.",
+      "expected_technique_ids": [
+        "T1003.001"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of LSASS Memory credential dumping.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 175.3483999996206,
+          "raw_ids": [
+            "T1003.001",
+            "T1003.004",
+            "T1003"
+          ],
+          "accepted_ids": [
+            "T1003.001",
+            "T1003.004",
+            "T1003"
+          ],
+          "raw_scores_percent": [
+            78.50857973098755,
+            73.34043979644775,
+            69.95031833648682
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 176.92989999977726,
+          "raw_ids": [
+            "T1003.001",
+            "T1003.004",
+            "T1003.002"
+          ],
+          "accepted_ids": [
+            "T1003.001",
+            "T1003.004",
+            "T1003.002"
+          ],
+          "raw_scores_percent": [
+            76.21372938156128,
+            70.46855688095093,
+            66.60568118095398
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 181.92050000016025,
+          "raw_ids": [
+            "T1003.001",
+            "T1003.004",
+            "T1003"
+          ],
+          "accepted_ids": [
+            "T1003.001",
+            "T1003.004",
+            "T1003"
+          ],
+          "raw_scores_percent": [
+            77.87612080574036,
+            70.93456983566284,
+            70.84389925003052
+          ]
+        }
+      }
+    },
+    {
+      "id": "q10",
+      "split": "dev",
+      "query": "Add a program to run automatically at system startup to maintain access.",
+      "expected_technique_ids": [
+        "T1547.001"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Registry Run Keys / Startup Folder.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 168.2240999998612,
+          "raw_ids": [
+            "T1547",
+            "T1547.001",
+            "T1037.005"
+          ],
+          "accepted_ids": [
+            "T1547",
+            "T1547.001"
+          ],
+          "raw_scores_percent": [
+            68.5824990272522,
+            65.6032145023346,
+            61.726510524749756
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 184.54900000006091,
+          "raw_ids": [
+            "T1547.001",
+            "T1547",
+            "T1037.005"
+          ],
+          "accepted_ids": [
+            "T1547.001",
+            "T1547"
+          ],
+          "raw_scores_percent": [
+            64.20140266418457,
+            63.6089563369751,
+            60.43223738670349
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 171.6283000000658,
+          "raw_ids": [
+            "T1547.001",
+            "T1547",
+            "M1033"
+          ],
+          "accepted_ids": [
+            "T1547.001",
+            "T1547"
+          ],
+          "raw_scores_percent": [
+            64.55580592155457,
+            63.10047507286072,
+            60.80595254898071
+          ]
+        }
+      }
+    },
+    {
+      "id": "q11",
+      "split": "dev",
+      "query": "Disable or modify a security tool on an endpoint to reduce detection.",
+      "expected_technique_ids": [
+        "T1685"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of the active ATT&CK technique Disable or Modify Tools in the local bundle.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 179.78380000022298,
+          "raw_ids": [
+            "T1685",
+            "T1027.005",
+            "T1685.003"
+          ],
+          "accepted_ids": [
+            "T1685",
+            "T1027.005",
+            "T1685.003"
+          ],
+          "raw_scores_percent": [
+            72.163987159729,
+            69.74073648452759,
+            68.9482569694519
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 177.28840000017954,
+          "raw_ids": [
+            "T1685",
+            "T1685.003",
+            "T1027.005"
+          ],
+          "accepted_ids": [
+            "T1685",
+            "T1685.003",
+            "T1027.005"
+          ],
+          "raw_scores_percent": [
+            70.39704322814941,
+            66.6463851928711,
+            66.09715223312378
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 174.94370000031267,
+          "raw_ids": [
+            "T1685",
+            "T1027.005",
+            "T1685.003"
+          ],
+          "accepted_ids": [
+            "T1685",
+            "T1027.005",
+            "T1685.003"
+          ],
+          "raw_scores_percent": [
+            72.47005105018616,
+            68.33876371383667,
+            68.30489039421082
+          ]
+        }
+      }
+    },
+    {
+      "id": "q12",
+      "split": "dev",
+      "query": "Use a script to collect system and user information from the victim host.",
+      "expected_technique_ids": [
+        "T1082",
+        "T1033"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "System Information Discovery and System Owner/User Discovery are both plausible.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 177.79430000018692,
+          "raw_ids": [
+            "T1592",
+            "T1033",
+            "T1039"
+          ],
+          "accepted_ids": [
+            "T1592",
+            "T1033",
+            "T1039"
+          ],
+          "raw_scores_percent": [
+            68.83525848388672,
+            67.22406148910522,
+            63.20419907569885
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 166.71020000012504,
+          "raw_ids": [
+            "T1592",
+            "T1033",
+            "T1592.002"
+          ],
+          "accepted_ids": [
+            "T1592",
+            "T1033",
+            "T1592.002"
+          ],
+          "raw_scores_percent": [
+            69.13668513298035,
+            68.7577486038208,
+            62.7427339553833
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 171.1633999998412,
+          "raw_ids": [
+            "T1592",
+            "T1033",
+            "DC0003"
+          ],
+          "accepted_ids": [
+            "T1592",
+            "T1033",
+            "DC0003"
+          ],
+          "raw_scores_percent": [
+            69.58029270172119,
+            68.55651140213013,
+            64.48660492897034
+          ]
+        }
+      }
+    },
+    {
+      "id": "q13",
+      "split": "dev",
+      "query": "Exploit a vulnerability in a public-facing application to gain access.",
+      "expected_technique_ids": [
+        "T1190"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Exploit Public-Facing Application.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 176.88440000029004,
+          "raw_ids": [
+            "T1190",
+            "T1068",
+            "T1203"
+          ],
+          "accepted_ids": [
+            "T1190",
+            "T1068",
+            "T1203"
+          ],
+          "raw_scores_percent": [
+            71.39983177185059,
+            68.06901097297668,
+            67.1921968460083
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 176.15520000026663,
+          "raw_ids": [
+            "T1190",
+            "T1068",
+            "T1687"
+          ],
+          "accepted_ids": [
+            "T1190",
+            "T1068",
+            "T1687"
+          ],
+          "raw_scores_percent": [
+            69.61015462875366,
+            67.69530773162842,
+            67.50398874282837
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 172.82269999986966,
+          "raw_ids": [
+            "T1190",
+            "T1687",
+            "T1068"
+          ],
+          "accepted_ids": [
+            "T1190",
+            "T1687",
+            "T1068"
+          ],
+          "raw_scores_percent": [
+            71.34438157081604,
+            67.3342764377594,
+            67.27502346038818
+          ]
+        }
+      }
+    },
+    {
+      "id": "q14",
+      "split": "dev",
+      "query": "Send a phishing email with a malicious attachment to an employee.",
+      "expected_technique_ids": [
+        "T1566.001"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Spearphishing Attachment.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 164.08789999968576,
+          "raw_ids": [
+            "T1566",
+            "T1566.001",
+            "T1598"
+          ],
+          "accepted_ids": [
+            "T1566",
+            "T1566.001",
+            "T1598"
+          ],
+          "raw_scores_percent": [
+            68.11879277229309,
+            66.55213832855225,
+            66.0904586315155
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 269.96220000000903,
+          "raw_ids": [
+            "T1566",
+            "T1598",
+            "T1566.002"
+          ],
+          "accepted_ids": [
+            "T1566",
+            "T1598",
+            "T1566.002"
+          ],
+          "raw_scores_percent": [
+            67.85002946853638,
+            66.22031331062317,
+            64.62957262992859
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 357.0220999999947,
+          "raw_ids": [
+            "T1566",
+            "T1598",
+            "T1566.001"
+          ],
+          "accepted_ids": [
+            "T1566",
+            "T1598",
+            "T1566.001"
+          ],
+          "raw_scores_percent": [
+            67.60728359222412,
+            66.51527881622314,
+            65.25564193725586
+          ]
+        }
+      }
+    },
+    {
+      "id": "q15",
+      "split": "dev",
+      "query": "Use a legitimate remote access utility to control a compromised host.",
+      "expected_technique_ids": [
+        "T1219"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Remote Access Software.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 281.81279999989783,
+          "raw_ids": [
+            "T1219.003",
+            "T1219",
+            "T1219.002"
+          ],
+          "accepted_ids": [
+            "T1219.003",
+            "T1219",
+            "T1219.002"
+          ],
+          "raw_scores_percent": [
+            70.52099704742432,
+            70.16129493713379,
+            67.63022541999817
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 236.05959999986226,
+          "raw_ids": [
+            "T1219.003",
+            "T1219",
+            "T1127"
+          ],
+          "accepted_ids": [
+            "T1219.003",
+            "T1219",
+            "T1127"
+          ],
+          "raw_scores_percent": [
+            68.92375946044922,
+            66.92991256713867,
+            66.16039872169495
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 255.7050000000345,
+          "raw_ids": [
+            "T1102.003",
+            "T1219",
+            "T1219.003"
+          ],
+          "accepted_ids": [
+            "T1102.003",
+            "T1219",
+            "T1219.003"
+          ],
+          "raw_scores_percent": [
+            67.11729764938354,
+            66.78364276885986,
+            66.42568111419678
+          ]
+        }
+      }
+    },
+    {
+      "id": "q16",
+      "split": "dev",
+      "query": "Create or modify an account to preserve access to the environment.",
+      "expected_technique_ids": [
+        "T1136",
+        "T1098"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Account Creation or Account Manipulation may fit depending on evidence.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 236.1817000000883,
+          "raw_ids": [
+            "T1136",
+            "T1098",
+            "T1548.005"
+          ],
+          "accepted_ids": [
+            "T1136",
+            "T1098",
+            "T1548.005"
+          ],
+          "raw_scores_percent": [
+            65.88629484176636,
+            65.736985206604,
+            62.73168325424194
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 226.21780000008584,
+          "raw_ids": [
+            "T1136",
+            "T1548.005",
+            "T1136.001"
+          ],
+          "accepted_ids": [
+            "T1136",
+            "T1548.005"
+          ],
+          "raw_scores_percent": [
+            62.59307861328125,
+            62.088024616241455,
+            61.883556842803955
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 246.60069999981715,
+          "raw_ids": [
+            "DC0014",
+            "DC0010",
+            "M1018"
+          ],
+          "accepted_ids": [
+            "DC0014",
+            "DC0010",
+            "M1018"
+          ],
+          "raw_scores_percent": [
+            64.521324634552,
+            64.49284553527832,
+            64.36232328414917
+          ]
+        }
+      }
+    },
+    {
+      "id": "q17",
+      "split": "dev",
+      "query": "A ransomware operator encrypts files across enterprise endpoints for impact.",
+      "expected_technique_ids": [
+        "T1486"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Ransomware-specific paraphrase of Data Encrypted for Impact.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 402.17429999984233,
+          "raw_ids": [
+            "T1486",
+            "T1496.001",
+            "T1496"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1496.001",
+            "T1496"
+          ],
+          "raw_scores_percent": [
+            66.78609848022461,
+            64.33253884315491,
+            63.23173642158508
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 213.57650000027206,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "T1570"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "T1570"
+          ],
+          "raw_scores_percent": [
+            66.73222780227661,
+            64.02527093887329,
+            63.059890270233154
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 215.10799999987285,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "DC0003"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "DC0003"
+          ],
+          "raw_scores_percent": [
+            66.77303314208984,
+            64.69634175300598,
+            62.83203363418579
+          ]
+        }
+      }
+    },
+    {
+      "id": "q18",
+      "split": "dev",
+      "query": "The adversary removes backups and recovery options, then encrypts systems for extortion.",
+      "expected_technique_ids": [
+        "T1490",
+        "T1486"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Two explicitly described impact techniques.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 604.8627000000124,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "T1490"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "T1490"
+          ],
+          "raw_scores_percent": [
+            74.46339130401611,
+            70.06681561470032,
+            68.97144317626953
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 541.7069000000083,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "T1490"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "T1490"
+          ],
+          "raw_scores_percent": [
+            73.07056188583374,
+            69.52052116394043,
+            69.10622119903564
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 582.0136999996066,
+          "raw_ids": [
+            "T1486",
+            "T1679",
+            "T1657"
+          ],
+          "accepted_ids": [
+            "T1486",
+            "T1679",
+            "T1657"
+          ],
+          "raw_scores_percent": [
+            73.54527711868286,
+            71.70653343200684,
+            69.51894760131836
+          ]
+        }
+      }
+    },
+    {
+      "id": "q19",
+      "split": "dev",
+      "query": "An intruder uses an account's existing password to sign in without exploiting software.",
+      "expected_technique_ids": [
+        "T1078"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Valid Accounts describes use of legitimate credentials.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 208.35769999985132,
+          "raw_ids": [
+            "T1078",
+            "T1564.002",
+            "T1056.002"
+          ],
+          "accepted_ids": [
+            "T1078",
+            "T1564.002",
+            "T1056.002"
+          ],
+          "raw_scores_percent": [
+            67.46370196342468,
+            64.90742564201355,
+            64.75668549537659
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 199.57769999973607,
+          "raw_ids": [
+            "T1078",
+            "T1136",
+            "T1201"
+          ],
+          "accepted_ids": [
+            "T1078",
+            "T1136",
+            "T1201"
+          ],
+          "raw_scores_percent": [
+            64.89810347557068,
+            64.60655331611633,
+            64.20648694038391
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 195.65670000019963,
+          "raw_ids": [
+            "T1556.004",
+            "T1110.003",
+            "T1110.001"
+          ],
+          "accepted_ids": [
+            "T1556.004",
+            "T1110.003",
+            "T1110.001"
+          ],
+          "raw_scores_percent": [
+            67.37246513366699,
+            66.26216173171997,
+            65.90787768363953
+          ]
+        }
+      }
+    },
+    {
+      "id": "q20",
+      "split": "dev",
+      "query": "Search the network for hosts running SMB or other file-sharing services.",
+      "expected_technique_ids": [
+        "T1046"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Network Service Discovery.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 190.34480000027543,
+          "raw_ids": [
+            "T1135",
+            "T1046",
+            "T1039"
+          ],
+          "accepted_ids": [
+            "T1135",
+            "T1046",
+            "T1039"
+          ],
+          "raw_scores_percent": [
+            72.789067029953,
+            66.8508529663086,
+            64.88639116287231
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 187.1596999999383,
+          "raw_ids": [
+            "T1135",
+            "T1046",
+            "T1039"
+          ],
+          "accepted_ids": [
+            "T1135",
+            "T1046",
+            "T1039"
+          ],
+          "raw_scores_percent": [
+            69.5838212966919,
+            66.46933555603027,
+            62.9311740398407
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 188.0881000001864,
+          "raw_ids": [
+            "T1135",
+            "T1046",
+            "T1039"
+          ],
+          "accepted_ids": [
+            "T1135",
+            "T1046",
+            "T1039"
+          ],
+          "raw_scores_percent": [
+            69.26108598709106,
+            66.40364527702332,
+            63.781702518463135
+          ]
+        }
+      }
+    },
+    {
+      "id": "q21",
+      "split": "dev",
+      "query": "Use stolen credentials to access a remote host over SSH for lateral movement.",
+      "expected_technique_ids": [
+        "T1021.004"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of SSH remote services.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 180.7678999998643,
+          "raw_ids": [
+            "T1563.001",
+            "T1021.004",
+            "T1563"
+          ],
+          "accepted_ids": [
+            "T1563.001",
+            "T1021.004",
+            "T1563"
+          ],
+          "raw_scores_percent": [
+            74.90506172180176,
+            71.9443678855896,
+            70.73659896850586
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 183.78379999967365,
+          "raw_ids": [
+            "T1563.001",
+            "T1021.004",
+            "T1563"
+          ],
+          "accepted_ids": [
+            "T1563.001",
+            "T1021.004",
+            "T1563"
+          ],
+          "raw_scores_percent": [
+            72.53943681716919,
+            68.41590404510498,
+            65.76447486877441
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 179.5299000000341,
+          "raw_ids": [
+            "T1563.001",
+            "T1018",
+            "T1210"
+          ],
+          "accepted_ids": [
+            "T1563.001",
+            "T1018",
+            "T1210"
+          ],
+          "raw_scores_percent": [
+            71.51259779930115,
+            65.71465134620667,
+            65.03626704216003
+          ]
+        }
+      }
+    },
+    {
+      "id": "q22",
+      "split": "dev",
+      "query": "Copy sensitive files to a cloud storage service controlled by the adversary.",
+      "expected_technique_ids": [
+        "T1567.002"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "Direct paraphrase of Exfiltration to Cloud Storage.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 180.49470000005385,
+          "raw_ids": [
+            "T1567.002",
+            "T1485.001",
+            "T1530"
+          ],
+          "accepted_ids": [
+            "T1567.002",
+            "T1485.001",
+            "T1530"
+          ],
+          "raw_scores_percent": [
+            72.35788106918335,
+            68.24473142623901,
+            67.5718367099762
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 178.63039999974717,
+          "raw_ids": [
+            "T1567.002",
+            "T1619",
+            "T1485.001"
+          ],
+          "accepted_ids": [
+            "T1567.002",
+            "T1619",
+            "T1485.001"
+          ],
+          "raw_scores_percent": [
+            67.26849675178528,
+            67.25035905838013,
+            66.99507236480713
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 171.31640000025072,
+          "raw_ids": [
+            "T1485.001",
+            "T1567.002",
+            "T1530"
+          ],
+          "accepted_ids": [
+            "T1485.001",
+            "T1567.002",
+            "T1530"
+          ],
+          "raw_scores_percent": [
+            69.20790672302246,
+            67.78491735458374,
+            66.98721647262573
+          ]
+        }
+      }
+    },
+    {
+      "id": "q28",
+      "split": "dev",
+      "query": "A broad hospital ransomware incident is reported, but no specific behavior or telemetry is known.",
+      "expected_technique_ids": [],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": true,
+      "justification": "Insufficient behavioral evidence to identify a specific technique.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 195.8411000000524,
+          "raw_ids": [
+            "T1679",
+            "T1518.002",
+            "T1092"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            60.693055391311646,
+            56.56379461288452,
+            56.41270875930786
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 248.28930000012406,
+          "raw_ids": [
+            "T1679",
+            "T1082",
+            "T1120"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            60.43365001678467,
+            57.79523849487305,
+            56.98493719100952
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 197.94230000024982,
+          "raw_ids": [
+            "T1679",
+            "M1049",
+            "DC0003"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            61.472344398498535,
+            57.88131356239319,
+            57.12587833404541
+          ]
+        }
+      }
+    },
+    {
+      "id": "q29",
+      "split": "dev",
+      "query": "What is the cafeteria menu and tomorrow's weather at the hospital?",
+      "expected_technique_ids": [],
+      "expected_collections": [
+        "attack_db"
+      ],
+      "abstention_required": true,
+      "justification": "Clearly outside ATT&CK retrieval domain.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 225.08790000028966,
+          "raw_ids": [
+            "T1037.005",
+            "T1137.004",
+            "T1124"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            43.46964955329895,
+            42.76014566421509,
+            41.97715520858765
+          ]
+        }
+      }
+    },
+    {
+      "id": "q30",
+      "split": "dev",
+      "query": "Describe the best treatment for a patient's seasonal allergies.",
+      "expected_technique_ids": [],
+      "expected_collections": [
+        "attack_db"
+      ],
+      "abstention_required": true,
+      "justification": "Clinical advice is outside the ATT&CK corpus and must be rejected.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 203.60900000014226,
+          "raw_ids": [
+            "T1499.002",
+            "T1007",
+            "T1499.003"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            45.28375864028931,
+            43.90314817428589,
+            43.832552433013916
+          ]
+        }
+      }
+    },
+    {
+      "id": "q33",
+      "split": "dev",
+      "query": "Explain how to calculate a patient's daily calorie needs from age and weight.",
+      "expected_technique_ids": [],
+      "expected_collections": [
+        "attack_db"
+      ],
+      "abstention_required": true,
+      "justification": "Clinical nutrition guidance is outside the ATT&CK corpus.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 269.5634000001519,
+          "raw_ids": [
+            "T1585",
+            "T1213.002",
+            "T1585.001"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            45.40530443191528,
+            45.30671834945679,
+            45.138418674468994
+          ]
+        }
+      }
+    },
+    {
+      "id": "q34",
+      "split": "dev",
+      "query": "Write a short poem about spring rain.",
+      "expected_technique_ids": [],
+      "expected_collections": [
+        "attack_db"
+      ],
+      "abstention_required": true,
+      "justification": "Creative writing is outside the ATT&CK corpus.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 206.31490000005215,
+          "raw_ids": [
+            "T1059.002",
+            "T1499.003",
+            "T1683.001"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            41.27492904663086,
+            40.91531038284302,
+            40.86124897003174
+          ]
+        }
+      }
+    },
+    {
+      "id": "q35",
+      "split": "dev",
+      "query": "How many beds are currently available in the emergency department?",
+      "expected_technique_ids": [],
+      "expected_collections": [
+        "attack_db"
+      ],
+      "abstention_required": true,
+      "justification": "Live hospital operations data is outside the ATT&CK corpus.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 237.86539999991874,
+          "raw_ids": [
+            "T1499.003",
+            "T1499.001",
+            "T1619"
+          ],
+          "accepted_ids": [],
+          "raw_scores_percent": [
+            44.4577693939209,
+            43.370521068573,
+            40.99559187889099
+          ]
+        }
+      }
+    },
+    {
+      "id": "q36",
+      "split": "dev",
+      "query": "Exploit a vulnerable remote service on a medical device to gain initial access to a networked host.",
+      "expected_technique_ids": [
+        "T1210"
+      ],
+      "expected_collections": [
+        "attack_db",
+        "redteam_db",
+        "detection_db"
+      ],
+      "abstention_required": false,
+      "justification": "ATT&CK Exploitation of Remote Services; the medical-device context does not change the technique label.",
+      "results": {
+        "attack_db": {
+          "latency_ms": 217.84649999972316,
+          "raw_ids": [
+            "T1190",
+            "T1210",
+            "T1219.003"
+          ],
+          "accepted_ids": [
+            "T1190",
+            "T1210",
+            "T1219.003"
+          ],
+          "raw_scores_percent": [
+            70.26653289794922,
+            69.4026529788971,
+            68.00705194473267
+          ]
+        },
+        "redteam_db": {
+          "latency_ms": 258.17300000016985,
+          "raw_ids": [
+            "T1210",
+            "T1190",
+            "T1219.003"
+          ],
+          "accepted_ids": [
+            "T1210",
+            "T1190",
+            "T1219.003"
+          ],
+          "raw_scores_percent": [
+            70.17765045166016,
+            68.9078152179718,
+            68.05984377861023
+          ]
+        },
+        "detection_db": {
+          "latency_ms": 199.29369999999835,
+          "raw_ids": [
+            "T1210",
+            "T1190",
+            "T1133"
+          ],
+          "accepted_ids": [
+            "T1210",
+            "T1190",
+            "T1133"
+          ],
+          "raw_scores_percent": [
+            70.32820582389832,
+            68.21955442428589,
+            66.32424592971802
+          ]
+        }
+      }
+    },
+    {
+      "id": "q37",
+      "split": "dev",
+      "query": "Identify malware used in the Ryuk ransomware campaign.",
+      "expected_technique_ids": [],
+      "expected_entity_ids": [
+        "S0446"
+      ],
+      "expected_collections": [
+        "actor_db"
+      ],
+      "abstention_required": false,
+      "justification": "Ryuk is listed as malware S0446 in the local Enterprise ATT&CK bundle.",
+      "results": {
+        "actor_db": {
+          "latency_ms": 360.9625999997661,
+          "raw_ids": [
+            "S0446",
+            "S0632",
+            "S0556"
+          ],
+          "accepted_ids": [
+            "S0446",
+            "S0632",
+            "S0556"
+          ],
+          "raw_scores_percent": [
+            79.72387671470642,
+            69.99930143356323,
+            69.62528228759766
+          ]
+        }
+      }
+    }
+  ]
+}

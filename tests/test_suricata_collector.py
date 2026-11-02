@@ -19,10 +19,10 @@ def temp_eve_file():
         os.remove(temp_path)
 
 
-def test_suricata_collector_missing_file() -> None:
+def test_suricata_collector_missing_file(monkeypatch) -> None:
     collector = SuricataCollector()
     # Temporarily force non-existent path
-    os.environ["SURICATA_EVE_PATH"] = "non_existent_file.json"
+    monkeypatch.setenv("SURICATA_EVE_PATH", "non_existent_file.json")
     alerts, metadata = collector.collect()
     assert alerts is None
     assert "failure_reason" in metadata
@@ -132,8 +132,8 @@ def test_suricata_collector_registration() -> None:
 def test_collection_node_with_suricata_and_wazuh_unreachable(monkeypatch, temp_eve_file) -> None:
     # 1. Force Wazuh to fail
     monkeypatch.setenv("WAZUH_URL", "https://wazuh-live.example.com:55000")
-    monkeypatch.setattr("collectors.wazuh.WazuhCollector._collect_from_wazuh", lambda *args, **kwargs: (None, "Wazuh unreachable"))
-    monkeypatch.setattr("collectors.wazuh.WazuhCollector._collect_from_wazuh_indexer", lambda *args: (None, {"failure_reason": "Indexer unreachable"}))
+    monkeypatch.setattr("collectors.wazuh.WazuhCollector.collect_manager", lambda *args, **kwargs: (None, "Wazuh unreachable"))
+    monkeypatch.setattr("collectors.wazuh.WazuhCollector.collect_indexer", lambda *args, **kwargs: (None, {"failure_reason": "Indexer unreachable"}))
 
     # 2. Configure mock Suricata alerts
     mock_suricata_alert = {

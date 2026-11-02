@@ -18,6 +18,8 @@ build/
 .pytest_cache/
 .pytest_tmp/
 .pytest_tmp_run/
+.pytest-tmp*/
+pytest_work/
 logs/
 *.log
 *.out
@@ -52,3 +54,20 @@ Thumbs.db
 
 # ─── Agents / AI assistant internal files ────────────────────────────────────
 .agents/
+
+# Local credentials, databases, model indexes, and generated incident evidence
+.env.*
+!.env.example
+*.pem
+*.key
+data/*.db
+data/*.db-*
+data/*.sqlite*
+data/*.sqlite3*
+models/cache/
+chroma_db/
+.pytest_tmp*/
+audit/*.json
+/handoff.json
+/test_handoff.json
+rag/evaluation/results/*.json

@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from pathlib import Path
+
+import pytest
 
 from graphs.nodes.correlation import correlation_node
 from graphs.nodes.collection import collection_node
@@ -132,6 +135,233 @@ def test_candidate_technique_prefers_native_wazuh_mitre_tag():
     # _candidate_technique returns (technique, similarity_score); verify technique matches.
     technique, score = _candidate_technique(alert)
     assert technique == "T1110"
+
+
+def test_medical_device_connection_attempt_is_not_mapped_to_exploitation():
+    alert = {
+        "id": "DEVICE-ATTEMPT",
+        "event_type": "unauthorized_access_attempt",
+        "decoder": "syslog",
+        "rule_description": "Medical device gateway: unauthorized network connection attempt",
+        "rule_groups": ["medical_device", "network", "unauthorized_access"],
+        "full_log": "Unauthorized Modbus connection attempt to infusion pump gateway",
+    }
+
+    assert _candidate_technique(alert) == ("", 0.0)
+
+
+def test_failed_rdp_evidence_overrides_conflicting_native_technique_hint():
+    alert = {
+        "event_type": "Failed RDP logon",
+        "decoder": "windows_eventchannel",
+        "rule_groups": ["rdp", "authentication_failed"],
+        "raw_log": "Logon failure: bad password",
+        "technique_hint": "T1021.001",
+    }
+
+    assert _candidate_technique(alert) == ("T1110", 1.0)
+
+
+def test_medical_device_hint_without_exploit_evidence_is_rejected():
+    alert = {
+        "event_type": "unauthorized_access_attempt",
+        "rule_description": "Medical device gateway connection attempt",
+        "rule_groups": ["medical_device", "network", "unauthorized_access"],
+        "full_log": "Unauthorized Modbus connection attempt",
+        "technique_hint": "T1210",
+    }
+
+    assert _candidate_technique(alert) == ("", 0.0)
+
+
+def test_medical_device_alert_with_explicit_exploit_evidence_maps_t1210():
+    alert = {
+        "event_type": "remote service exploit detected",
+        "decoder": "syslog",
+        "rule_description": "CVE-2025-12345 remote service exploit",
+        "rule_groups": ["medical_device", "exploit"],
+    }
+
+    assert _candidate_technique(alert) == ("T1210", 1.0)
+
+
+def test_failed_rdp_authentication_is_attempted_brute_force_not_lateral_movement():
+    from graphs.nodes.ioc_enrichment import _evidence_status
+
+    alert = {
+        "event_type": "Failed RDP logon",
+        "decoder": "windows_eventchannel",
+        "rule_groups": ["rdp", "authentication_failed"],
+        "raw_log": "Logon failure: bad password",
+    }
+    assert _candidate_technique(alert) == ("T1110", 1.0)
+    assert _evidence_status(alert) == "attempted"
+
+
+def test_successful_rdp_authentication_is_confirmed_lateral_movement():
+    from graphs.nodes.ioc_enrichment import _evidence_status
+
+    alert = {
+        "event_type": "Successful RDP logon",
+        "decoder": "windows_eventchannel",
+        "rule_groups": ["rdp", "authentication_success"],
+        "raw_log": "Successful logon; session created",
+    }
+    assert _candidate_technique(alert) == ("T1021.001", 1.0)
+    assert _evidence_status(alert) == "confirmed"
+
+
+def test_rdp_without_authentication_outcome_is_unclassified_and_uncertain():
+    from graphs.nodes.ioc_enrichment import _evidence_status
+
+    alert = {"event_type": "RDP connection observed", "rule_groups": ["rdp"]}
+    technique, score = _candidate_technique(alert)
+    assert technique == ""
+    assert score < 0.75
+    assert _evidence_status(alert) == "uncertain"
+
+
+def test_semantic_candidate_below_measured_relevance_threshold_is_rejected(monkeypatch):
+    from rag.pipeline import SearchResult
+
+    monkeypatch.setattr(
+        "rag.similarity_search.similarity_search",
+        lambda *_args, **_kwargs: [
+            SearchResult(1, "Technique: Inhibit System Recovery (T1490)", {"mitre_id": "T1490"}, 0.32)
+        ],
+    )
+    alert = {"event_type": "hospital cafeteria menu and weather forecast"}
+    assert _candidate_technique(alert) == ("", 0.68)
+
+
+def test_rag_retrieve_discards_documents_below_relevance_threshold(monkeypatch):
+    from rag import pipeline
+
+    class FakeCollection:
+        def query(self, **_kwargs):
+            return {
+                "ids": [["attack::T1486", "attack::T1490"]],
+                "documents": [["Relevant MITRE document", "Unrelated nearest neighbor"]],
+                "metadatas": [[
+                    {"mitre_id": "T1486", "type": "attack-pattern"},
+                    {"mitre_id": "T1490", "type": "attack-pattern"},
+                ]],
+                "distances": [[0.18, 0.49]],
+            }
+
+    class FakeClient:
+        def get_or_create_collection(self, **_kwargs):
+            return FakeCollection()
+
+    monkeypatch.setattr(pipeline, "_import_chroma", lambda: (type("Chroma", (), {"PersistentClient": lambda **_kwargs: FakeClient()}), lambda **_kwargs: object()))
+    assert pipeline.retrieve(Path("attack_db"), "query", "mock-model") == ["Relevant MITRE document"]
+
+
+def test_subtechnique_lookup_retries_parent_when_direct_query_has_no_evidence(monkeypatch):
+    from graphs.nodes.mitre_lookup import _query_with_parent_retry
+
+    questions = []
+
+    def query(question, *_args, **_kwargs):
+        questions.append(question)
+        return "No evidence found." if len(questions) == 1 else "Technique: Remote Desktop Protocol (T1021)."
+
+    monkeypatch.setattr("graphs.nodes.mitre_lookup._query_rag", query)
+    response = _query_with_parent_retry("T1021.001", None, "unused", lambda technique: technique)
+    assert questions == ["T1021.001", "T1021"]
+    assert "T1021" in response
+
+
+def test_timeline_labels_attempted_behavior():
+    state = {
+        "raw_alerts": [{"id": "RDP-1", "timestamp": "2026-07-04T10:00:00Z", "event_type": "Failed RDP logon"}],
+        "enriched_iocs": [{"alert_id": "RDP-1", "technique_confirmed": "T1110", "evidence_status": "attempted"}],
+    }
+    assert "evidence_status=attempted" in _format_attack_timeline_section(state)
+
+
+def test_prediction_at_terminal_impact_stage_uses_safe_empty_fallback(monkeypatch):
+    from graphs.nodes.prediction import prediction_node
+
+    monkeypatch.setattr("graphs.nodes.prediction._query_rag_with_evidence", lambda *args, **kwargs: ("No retrieved evidence.", []))
+    monkeypatch.setattr("graphs.nodes.prediction.time.sleep", lambda *_args, **_kwargs: None)
+    result = prediction_node(
+        {
+            "confidence_score": 1.0,
+            "campaign": {
+                "current_stage": "Impact",
+                "kill_chain_position": 7,
+                "campaign_confidence": 1.0,
+                "techniques_confirmed": ["T1486", "T1490"],
+            },
+        }
+    )["prediction"]
+
+    assert result["predicted_next_techniques"] == []
+    assert result["time_to_next_stage"] == "Unknown"
+    assert result["prediction_confidence"] == 0.0
+    assert "no retrieved technique evidence" in result["note"].lower()
+    assert result["stage"] == "Impact"
+    assert result["confidence"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "stage,position,confirmed",
+    [
+        ("Credential Access", 5, ["T1110"]),
+        ("Discovery", 2, ["T1046"]),
+        ("Lateral Movement", 6, ["T1021.001"]),
+        ("Execution", 3, ["T1059.001"]),
+        ("Impact", 7, ["T1486"]),
+    ],
+)
+def test_predictions_only_include_retrieved_ids_and_do_not_invent_time(monkeypatch, stage, position, confirmed):
+    from graphs.nodes.prediction import prediction_node
+    from rag.pipeline import SearchResult
+
+    answer = (
+        "Likely follow-on: T1490. The model also mentioned T9999, which was not retrieved.\n"
+        "Retrieved from database: T1490\n"
+        "Used in this answer but NOT found in retrieved context: T9999"
+    )
+    evidence = [SearchResult(
+        rank=1,
+        document="Technique: Inhibit System Recovery (T1490). Adversaries may delete backups to prevent restoration.",
+        metadata={"mitre_id": "T1490", "type": "redteam-procedure"},
+        distance=0.2,
+    )]
+    monkeypatch.setattr("graphs.nodes.prediction._query_rag_with_evidence", lambda *args, **kwargs: (answer, evidence))
+    monkeypatch.setattr("graphs.nodes.prediction.time.sleep", lambda *_args, **_kwargs: None)
+    prediction = prediction_node({
+        "confidence_score": 1.0,
+        "campaign": {
+            "current_stage": stage, "kill_chain_position": position,
+            "campaign_confidence": 1.4, "techniques_confirmed": confirmed,
+        },
+    })["prediction"]
+
+    if stage == "Impact":
+        assert prediction["predicted_next_techniques"] == []
+        assert "terminal impact" in prediction["note"].lower()
+        return
+    assert prediction["predicted_next_techniques"] == ["T1490"]
+    assert prediction["retrieved_ids"] == ["T1490"]
+    assert prediction["beyond_retrieved_ids"] == ["T9999"]
+    assert prediction["time_to_next_stage"] == "Unknown"
+    assert 0.0 <= prediction["confidence"] <= 1.0
+    assert prediction["confidence_basis"].endswith("not statistically calibrated.")
+    assert "backups" in prediction["predicted_next_technique_details"][0]["retrieved_evidence"]
+    assert "not confirmed attacker actions" in prediction["note"]
+
+
+def test_prediction_with_insufficient_evidence_has_safe_schema():
+    from graphs.nodes.prediction import prediction_node
+
+    prediction = prediction_node({"confidence_score": 0.0, "campaign": {}})["prediction"]
+    assert prediction["predicted_next_techniques"] == []
+    assert prediction["time_to_next_stage"] == "Unknown"
+    assert prediction["confidence"] == 0.0
+    assert prediction["stage"] == "Insufficient Evidence"
 
 
 def test_fallback_ioc_preserves_structural_technique_confidence():
