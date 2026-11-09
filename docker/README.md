@@ -1,32 +1,30 @@
 # Docker deployment notes
 
-This repository supports a production-oriented multi-container deployment for the MedFlow SOC stack.
+The root `docker-compose.yml` defines these services:
 
-## Service layout
+- `medflow`: Python application, FastAPI health/webhook endpoints, investigators, collectors, and response workflow.
+- `wazuh.manager`, `wazuh.indexer`, and `wazuh.dashboard`: the optional Wazuh services described by the root Compose file.
+- `suricata`: a separate IDS container configured for Linux host networking.
 
-- medflow: main Python application, FastAPI API, LangGraph workflows, RAG, investigation engine
-- wazuh.manager: manager service that ingests alerts and exposes the Wazuh API
-- wazuh.indexer: search/index store for alert data
-- wazuh.dashboard: dashboard UI
-- suricata: IDS sensor that writes eve.json to the shared log volume
+The user-maintained Windows SSH lab and its dedicated sensor may use separate Compose projects that are not stored in this repository. The root Compose file does not define an SSH target or a MISP service. Do not assume Compose service names or networking are shared across projects; verify the actual Docker network and configured endpoints.
 
-## Important architecture choice
+## Safe app-only operation
 
-Wazuh and Suricata should not run in the same Python app container. They are independent services with different operational responsibilities and lifecycle requirements.
+After the approved telemetry services are running and reachable, validate configuration with `docker compose config --quiet`. To build/start only the app service without touching its dependencies:
 
-The recommended production pattern is:
+```powershell
+docker compose up -d --build --no-deps medflow
+```
 
-- MedFlow application in its own container
-- Wazuh manager + indexer + dashboard in separate containers
-- Suricata in its own dedicated IDS container
-- Shared Docker volumes for logs, CTI, vector data, and caches
-- Docker networks for internal service communication
+The container health check is `GET /health` on port `8000`. The root Compose file mounts `suricata/lab-logs` read-only at `/app/suricata/lab-logs` and sets `SURICATA_EVE_PATH` to the mounted EVE file. Suricata host networking in the root file is intended for Linux; Docker Desktop on Windows does not provide equivalent packet capture.
 
-This structure matches a realistic SOC deployment model and keeps the MedFlow platform from becoming a monolith.
+The app startup script downloads MITRE CTI data and builds vector indexes when their volumes are empty. Avoid recreating a populated app container casually: the Compose file persists the cache, vector DBs, MITRE subdirectory, and logs, but the incident SQLite store and collector checkpoints default elsewhere under `/app/data` and currently lack an explicit persistent mount.
 
-## Operational notes
+## Configuration and security
 
-- Fresh environments clone the repo and run `docker compose up -d --build`.
-- `docker/init-medflow.sh` populates MITRE CTI and vector DBs if they are missing.
-- Wazuh and Suricata data is persisted to Docker volumes and mounted host paths for alert replay/inspection.
-- Secrets live in `.env`; `.env` is never committed.
+- Store credentials in a local `.env`, based on `.env.example`; never commit that file.
+- Compose requires Wazuh API, Indexer, and Dashboard passwords as explicitly configured values; it has no password defaults.
+- Keep Wazuh/MISP certificate verification enabled. Mount a private CA certificate read-only and use its in-container path if the system trust store does not recognize it.
+- Treat raw EVE records, SQLite incidents/outbox, and checkpoints as sensitive local data.
+- Do not expose the unauthenticated webhook beyond a trusted lab network.
+- The CLI executor is dry-run. Containment requires an explicit human decision; live connector scope and rollback remain pending review.

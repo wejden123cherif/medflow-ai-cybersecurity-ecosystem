@@ -1,88 +1,25 @@
-# Suricata IDS — MedFlow AI Integration
+# Suricata integration
 
-This directory contains the Suricata IDS Docker setup for the **MedFlow AI Cybersecurity Ecosystem**.
+This directory contains the repository's Linux-oriented Suricata container configuration and rule examples. It is separate from the Windows Docker Desktop SSH lab sensor, which is maintained outside this repository.
 
-## Directory Structure
+## Files
 
-```
-suricata/
-├── Dockerfile           # Builds Suricata from Ubuntu 22.04 + OISF PPA
-├── docker-compose.yml   # Launches Suricata as a service
-├── suricata.yaml        # Suricata configuration (eve-log enabled)
-├── rules/
-│   └── local.rules      # Custom MITRE ATT&CK-mapped detection rules
-├── logs/                # Volume mount — eve.json written here at runtime
-│   └── .gitkeep
-└── README.md
-```
+- `Dockerfile` builds the Suricata image.
+- `docker-compose.yml` runs the repository sensor with Linux host networking.
+- `suricata.yaml` enables EVE JSON output and configures capture interfaces.
+- `rules/local.rules` contains the repository's custom demonstration rules.
+- `pcap/test.pcap` is a maintained offline capture fixture; it is not evidence of live traffic.
 
-## How It Works
+The Compose sensor uses `network_mode: host`, which is intended for Linux. Docker Desktop on Windows does not expose host packet capture in the same way. Do not treat this container's existing EVE file as proof that it inspected Windows loopback or SSH traffic.
 
-1. **Suricata** runs as a Docker container in `network_mode: host`, sniffing live network traffic.
-2. It writes **JSON alerts** to `/var/log/suricata/eve.json` inside the container.
-3. This path is **volume-mounted** to `./logs/eve.json` on the host filesystem.
-4. **MedFlow** reads `eve.json` via the `SURICATA_EVE_PATH` environment variable using `collectors/suricata.py`.
+## EVE collection
 
-## Getting Started
+Suricata writes EVE JSONL to `/var/log/suricata/eve.json` inside its container. The repository Suricata Compose file mounts `suricata/logs` for that sensor. The isolated lab sensor instead writes the reported file `suricata/lab-logs/eve.json`; the root MedFlow Compose service mounts that directory read-only into the app and sets `SURICATA_EVE_PATH=/app/suricata/lab-logs/eve.json`.
 
-### 1. Start Suricata
+Confirm the active sensor, interface, file timestamp, and source path before using a live investigation. Do not edit historical event timestamps or generate traffic outside the authorized lab process.
 
-```bash
-cd suricata/
-docker-compose up -d
-```
+## Rules
 
-### 2. Verify it's running
+The checked-in `rules/local.rules` includes demonstration rules such as ICMP SID `9000001`, network-scan SID `9000002`, and SSH connection-pattern SID `9000003`. These are distinct from the separate lab rule SID `9900003` reported in `suricata/lab-logs/eve.json`. The lab SID detects repeated SSH connections, not necessarily failed passwords. Wazuh authentication rule `5760` provides endpoint authentication evidence when its agent and manager are configured to collect it.
 
-```bash
-docker-compose ps
-docker logs medflow-suricata
-```
-
-### 3. Check eve.json is being generated
-
-```bash
-tail -f suricata/logs/eve.json
-```
-
-### 4. Configure MedFlow
-
-Ensure your `.env` file contains:
-
-```env
-SURICATA_EVE_PATH=suricata/logs/eve.json
-```
-
-This is the path the `SuricataCollector` reads from.
-
-## Custom Rules
-
-Rules are in `rules/local.rules`. They include detections for:
-
-| SID     | Technique     | Description                      |
-|---------|---------------|----------------------------------|
-| 9000001 | —             | ICMP ping (connectivity test)    |
-| 9000002 | T1046         | Network Service Scanning         |
-| 9000003 | T1110         | SSH Brute Force                  |
-| 9000004 | T1110.001     | RDP Brute Force                  |
-| 9000005 | T1071.001     | Suspicious HTTP User-Agent       |
-| 9000006 | T1041         | Large Outbound Data Exfiltration |
-| 9000007 | T1190         | SQL Injection Attempt            |
-| 9000008 | T1059         | Remote Code Execution via HTTP   |
-| 9000009 | T1071.004     | DNS Tunneling (Long Query)       |
-| 9000010 | T1498         | UDP Flood DoS Attack             |
-
-## MITRE ATT&CK Mapping
-
-The `SuricataCollector` (`collectors/suricata.py`) automatically extracts MITRE technique IDs from the rule `msg` field using the pattern `T\d{4}`. MedFlow uses this for triage and enrichment.
-
-## Future Connectors
-
-The Suricata IDS integration in `integrations/ids/` (planned) can use the Suricata Unix socket or REST API to dynamically load/reload rules and query alert statistics without parsing eve.json.
-
-## Stopping Suricata
-
-```bash
-cd suricata/
-docker-compose down
-```
+The Suricata response adapter exists under `integrations/ids/`, but live rule changes or drops have not been verified end to end. Review approval, lab scope, and rollback before enabling any live response.

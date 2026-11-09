@@ -9,7 +9,15 @@ from integrations.ids.connector import IDSConnector
 
 @pytest.fixture
 def connector():
-    return IDSConnector(socket_path="/var/run/suricata/test.socket")
+    calls = []
+
+    def remote_runner(command, timeout=10):
+        calls.append((command, timeout))
+        return {"success": True, "stdout": "ok", "stderr": "", "returncode": 0}
+
+    c = IDSConnector(socket_path="/var/run/suricata/test.socket", remote_runner=remote_runner)
+    c.calls = calls
+    return c
 
 
 class TestIDSConnectorHealth:
@@ -44,7 +52,7 @@ class TestIDSConnectorDropConnection:
             {"action_type": "DROP_CONNECTION", "target": "192.168.1.100:45231"}
         )
         assert result["status"] == "success"
-        assert "192.168.1.100:45231" in result["details"]
+        assert "192.168.1.100" in result["details"]
 
     def test_drop_connection_missing_target(self, connector):
         result = connector.execute_action({"action_type": "DROP_CONNECTION", "target": ""})

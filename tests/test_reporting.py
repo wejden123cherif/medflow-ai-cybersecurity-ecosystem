@@ -7,6 +7,7 @@ from graphs.nodes.correlation import correlation_node
 from graphs.nodes.collection import collection_node
 from graphs.nodes.ioc_enrichment import (
     _MISP_PREFLIGHT_CACHE,
+    _alert_enrichment_cache_key,
     _actor_signature_from_alert,
     _candidate_technique,
     _fallback_ioc,
@@ -786,6 +787,71 @@ def test_persistent_ioc_cache_key_uses_scenario_hash_and_alert_id():
     key = _persistent_ioc_cache_key({"id": "1740421567.887891"}, "abc123")
 
     assert key == "abc123:1740421567.887891"
+
+
+def test_ioc_enrichment_reuses_semantic_no_match_for_repeated_signature(monkeypatch):
+    class FakeLlm:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeAgent:
+        pass
+
+    candidate_calls = []
+
+    def fake_candidate(alert, raw_alerts):
+        candidate_calls.append(alert["id"])
+        return "", 0.61
+
+    monkeypatch.setattr("graphs.nodes.ioc_enrichment.ChatGroq", FakeLlm)
+    monkeypatch.setattr("graphs.nodes.ioc_enrichment.create_react_agent", lambda *_args: FakeAgent())
+    monkeypatch.setattr("graphs.nodes.ioc_enrichment._misp_preflight", lambda: (False, "MISP disabled for test"))
+    monkeypatch.setattr("graphs.nodes.ioc_enrichment._candidate_technique", fake_candidate)
+    alerts = [
+        {
+            "id": f"suricata:{index}",
+            "source_ip": f"192.0.2.{index}",
+            "destination": "192.0.2.50",
+            "event_type": "Test Rule",
+            "severity": "low",
+            "rule_id": "1:99999:1",
+            "source_type": "suricata",
+            "decoder": "suricata",
+            "rule_groups": ["ids"],
+            "raw_log": "Repeated test signature",
+        }
+        for index in range(1, 4)
+    ]
+
+    result = ioc_enrichment_node(
+        {"collection_metadata": {"data_source": "suricata_live"}, "raw_alerts": alerts, "errors": []}
+    )
+
+    assert candidate_calls == ["suricata:1"]
+    technique_warnings = [
+        message for message in result["errors"]
+        if "Technique extraction skipped" in message
+    ]
+    assert len(technique_warnings) == 1
+
+
+def test_enrichment_cache_reuses_signature_context_but_separates_cve_evidence():
+    first = {
+        "source_type": "suricata",
+        "source_ip": "192.0.2.10",
+        "destination": "192.0.2.50",
+        "event_type": "MEDFLOW T1046 Network Service Scanning Attempt",
+        "rule_id": "1:9000002:1",
+        "decoder": "suricata",
+        "raw_log": '{"flow_id": 1}',
+    }
+    repeated = {**first, "raw_log": '{"flow_id": 2}'}
+    different_cve = {**first, "raw_log": "Observed CVE-2026-12345 in evidence"}
+
+    key = _alert_enrichment_cache_key(first, "T1046", False)
+
+    assert _alert_enrichment_cache_key(repeated, "T1046", False) == key
+    assert _alert_enrichment_cache_key(different_cve, "T1046", True) != key
 
 
 def test_ioc_enrichment_skips_query_misp_when_preflight_unavailable(monkeypatch):

@@ -13,6 +13,13 @@ from graphs.threat_intel_graph import initialize_incident_node
 from models.incident import Incident
 
 
+
+@pytest.fixture(autouse=True)
+def fake_wazuh_credentials(monkeypatch):
+    monkeypatch.setenv("WAZUH_USER", "offline-test-user")
+    monkeypatch.setenv("WAZUH_PASSWORD", "offline-test-password")
+    monkeypatch.setenv("WAZUH_INDEXER_USER", "offline-test-indexer")
+    monkeypatch.setenv("WAZUH_INDEXER_PASSWORD", "offline-test-indexer-password")
 class MockGroqClient:
     """Mock Groq client that returns pre-configured response for Response Planner."""
     response_content: str = (

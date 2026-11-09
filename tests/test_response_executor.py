@@ -95,6 +95,21 @@ def test_approved_tier1_action_executes_successfully() -> None:
     assert "ACTION_EXECUTED" in [entry["action"] for entry in result["audit_log"]]
 
 
+def test_soc_email_is_deferred_until_incident_persistence():
+    from graphs.nodes.response_executor import ResponseExecutor
+
+    class MustNotSend:
+        def execute_action(self, *_args, **_kwargs):
+            raise AssertionError("response executor must not send email before persistence")
+
+    executor = ResponseExecutor(dry_run=False)
+    executor.email = MustNotSend()
+    result = executor._notify_soc(_action("ACT-1", "NOTIFY_SOC"), _base_state())
+    assert result["execution_status"] == "skipped"
+    assert result["error"] == "deferred_until_persisted"
+    assert "no email was sent" in result["details"]
+
+
 def test_rejected_action_is_skipped() -> None:
     rejected = [_action("ACT-1", "ISOLATE_ENDPOINT", target="ehr-fileserver-02", requires_approval=True, decision="rejected")]
     result = response_executor_node(_base_state(rejected_actions=rejected, proposed_actions=rejected))
@@ -111,6 +126,44 @@ def test_action_requiring_approval_but_not_approved_is_blocked() -> None:
     assert result["execution_summary"]["skipped"] == 1
     assert result["execution_results"][0]["execution_status"] == "skipped"
     assert "not approved or acknowledged" in result["execution_results"][0]["details"]
+
+
+def test_disruptive_action_cannot_bypass_human_approval_with_playbook_flag() -> None:
+    action = _action(
+        "ACT-BLOCK-1",
+        "BLOCK_IP",
+        target="198.51.100.20",
+        requires_approval=False,
+        decision="approved",
+    )
+    action["approved_by"] = "system:approval_node"
+
+    result = response_executor_node(
+        _base_state(approved_actions=[action], proposed_actions=[action], response_dry_run=False)
+    )
+
+    assert result["execution_summary"]["skipped"] == 1
+    assert result["execution_results"][0]["execution_status"] == "skipped"
+    assert result["execution_results"][0]["error"] == ""
+    assert "ACTION_EXECUTION_SKIPPED" in [entry["action"] for entry in result["audit_log"]]
+
+
+def test_live_execution_skips_action_without_verified_rollback() -> None:
+    action = _action(
+        "ACT-DROP-1",
+        "DROP_CONNECTION",
+        target="198.51.100.20",
+        requires_approval=True,
+    )
+    action["reversible"] = False
+    state = _base_state(approved_actions=[action], proposed_actions=[action], response_dry_run=False)
+    state["allowed_actions"].append({"name": "DROP_CONNECTION", "risk_tier": 2, "requires_approval": True})
+
+    result = response_executor_node(state)
+
+    assert result["execution_summary"]["skipped"] == 1
+    assert result["execution_results"][0]["error"] == "rollback_not_available"
+    assert "ACTION_EXECUTION_SKIPPED" in [entry["action"] for entry in result["audit_log"]]
 
 
 def test_failed_execution_creates_audit_entry() -> None:

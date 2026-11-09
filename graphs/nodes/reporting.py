@@ -233,7 +233,7 @@ def _format_threat_assessment_section(state: ThreatIntelState) -> str:
         context = catalog.get(str(technique_id).upper(), {})
         name = context.get("name", technique_id)
         tactic = context.get("tactic", "Unknown")
-        technique_lines.append(f"- {technique_id} ({name}) — tactic: {tactic}")
+        technique_lines.append(f"- {technique_id} ({name}) â€” tactic: {tactic}")
     for index, technique_id in enumerate(techniques):
         statuses = sorted(
             {
@@ -262,7 +262,7 @@ def _format_current_attack_stage_section(state: ThreatIntelState) -> str:
     campaign = state.get("campaign", {})
     collection_metadata = state.get("collection_metadata", {})
     confidence_score = float(state.get("confidence_score", 0.0) or 0.0)
-    is_live = collection_metadata.get("data_source") == "wazuh_live"
+    is_live = collection_metadata.get("data_source") in {"wazuh_live", "suricata_live", "mixed_live"}
     stage = _campaign_stage(campaign)
     reasoning = str(campaign.get("stage_reasoning") or "").strip()
     kill_chain_position = campaign.get("kill_chain_position", "Unknown")
@@ -392,7 +392,7 @@ def _fallback_narrative(state: ThreatIntelState) -> dict[str, str]:
     campaign = state.get("campaign", {})
     collection_metadata = state.get("collection_metadata", {})
     confidence_score = float(state.get("confidence_score", 0.0) or 0.0)
-    is_live = collection_metadata.get("data_source") == "wazuh_live"
+    is_live = collection_metadata.get("data_source") in {"wazuh_live", "suricata_live", "mixed_live"}
     stage = _campaign_stage(campaign)
     techniques = ", ".join(campaign.get("techniques_confirmed", []) or _confirmed_technique_ids(state)) or "Unknown"
     actor = campaign.get("attributed_actor", "Unknown")
@@ -436,7 +436,7 @@ def _build_narrative_prompt(state: ThreatIntelState) -> str:
     summary = _build_condensed_summary(state)
     campaign = state.get("campaign", {})
     collection_metadata = state.get("collection_metadata", {})
-    is_live = collection_metadata.get("data_source") == "wazuh_live"
+    is_live = collection_metadata.get("data_source") in {"wazuh_live", "suricata_live", "mixed_live"}
     confidence_score = float(state.get("confidence_score", 0.0) or 0.0)
     current_stage = _campaign_stage(campaign)
     confirmed_technique_ids = _confirmed_technique_ids(state)
@@ -477,8 +477,8 @@ INVESTIGATION SUMMARY:
 {json.dumps(summary, indent=2)}
 
 Requirements:
-1. EXECUTIVE SUMMARY — 3-4 sentences, non-technical, suitable for hospital leadership.
-2. HEALTHCARE IMPACT — 2-4 sentences on patient care, HIPAA, and operational risk.
+1. EXECUTIVE SUMMARY â€” 3-4 sentences, non-technical, suitable for hospital leadership.
+2. HEALTHCARE IMPACT â€” 2-4 sentences on patient care, HIPAA, and operational risk.
 
 Use the exact current_stage and confirmed_technique_ids from the summary. Do not contradict them.
 Our kill chain uses exactly 7 stages (1-7). Never use X/9.
@@ -620,7 +620,7 @@ def reporting_node(state: ThreatIntelState) -> dict:
     errors = list(state.get("errors", []))
     settings = load_settings()
     campaign = state.get("campaign", {})
-    is_live = state.get("collection_metadata", {}).get("data_source") == "wazuh_live"
+    is_live = state.get("collection_metadata", {}).get("data_source") in {"wazuh_live", "suricata_live", "mixed_live"}
     has_confirmed_techniques = bool(_confirmed_technique_ids(state))
     sections = _build_deterministic_sections(state)
 

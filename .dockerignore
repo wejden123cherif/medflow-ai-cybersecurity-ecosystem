@@ -37,5 +37,40 @@ README.md
 
 docs/
 
+# Local Wazuh/MISP clones and their generated credentials
+wazuh-docker/
+wazuh/wazuh-docker/
+misp-docker/
+**/*.pem
+**/*.key
+**/*.crt
+**/*.cer
+**/*.p12
+**/*.pfx
+**/*.p7b
+
+# Runtime telemetry and local checkpoint/database state
+suricata/logs/
+suricata/lab-logs/
+suricata/pcap/
+data/collector-checkpoints/
+data/lab-ingestion-checkpoints/
+data/*.db
+data/*.sqlite*
+
+# Test scratch directories
+.pytest_cache/
+.pytest-tmp*/
+.pytest_tmp*/
+pytest_work/
+**/__pycache__/
+*.py[cod]
+
+# Local backup snapshots
+*.medflow-backup
+*.bak
+*.backup
+*.tmp
+
 # Keep source code but exclude caches
 **/__pycache__/

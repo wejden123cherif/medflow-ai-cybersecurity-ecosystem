@@ -12,12 +12,28 @@ from typing import Any
 
 import pytest
 
-from graphs.nodes.response_planner import _effective_requires_approval, response_planner_node
+from graphs.nodes.response_planner import _effective_requires_approval, _malicious_external_ips, response_planner_node
 from graphs.nodes.playbook_resolver import resolve_playbook_for_incident
 from models.incident import Incident
 from playbooks.loader import load_all_playbooks, playbook_for_technique
 
 PLAYBOOKS_DIR = Path(__file__).resolve().parents[1] / "playbooks"
+
+
+def test_block_ip_candidates_are_limited_to_correlated_alerts():
+    state = {
+        "campaign": {"correlated_alert_ids": ["IN-SCOPE"]},
+        "enriched_iocs": [
+            {"alert_id": "IN-SCOPE", "source_ip": "185.220.101.45"},
+            {"alert_id": "OUT-OF-SCOPE", "source_ip": "198.51.100.77"},
+        ],
+    }
+
+    assert _malicious_external_ips(state) == ["185.220.101.45"]
+
+
+def test_block_ip_candidates_fail_closed_without_campaign_scope():
+    assert _malicious_external_ips({"enriched_iocs": [{"source_ip": "185.220.101.45"}]}) == []
 
 
 class MockGroqClient:
@@ -49,13 +65,26 @@ class MockGroqClient:
 def mock_groq(monkeypatch):
     """Fixture to mock groq module and set responses."""
     from config import Settings
+    from graphs.nodes import response_planner
     monkeypatch.setattr(
-        "config.load_settings",
+        response_planner,
+        "load_settings",
         lambda: Settings(
             groq_api_key="mock-key",
             main_model="mock-model",
             secondary_model="mock-model",
-            embedding_model="mock-embedding"
+            embedding_model="mock-embedding",
+            smtp_host="smtp.example",
+            smtp_port=587,
+            smtp_user=None,
+            smtp_password=None,
+            smtp_from="medflow@example.com",
+            soc_email="soc@example.com",
+            email_mode="mock",
+            protected_ips=[],
+            target_vm_host="vm2.example",
+            target_vm_ssh_user="medflow",
+            target_vm_ssh_key_path="/keys/vm2",
         )
     )
     monkeypatch.setitem(
@@ -123,9 +152,9 @@ def test_credential_access_incident_success(mock_groq) -> None:
         "reason": "Notify SOC team immediately of brute force attempt."
       },
       {
-        "action": "BLOCK_IP",
+        "action": "BLOCK_SSH",
         "target": "10.200.5.50",
-        "reason": "Block attacker source IP to contain credential access activity."
+        "reason": "Block attacker source IP on SSH port to contain brute force activity."
       }
     ]
     </proposals>
@@ -138,7 +167,7 @@ def test_credential_access_incident_success(mock_groq) -> None:
     
     actions = [act["action_type"] for act in result["proposed_actions"]]
     assert "NOTIFY_SOC" in actions
-    assert "BLOCK_IP" in actions
+    assert "BLOCK_SSH" in actions
     assert result["planner_divergence_flag"] is False
 
 
@@ -254,8 +283,8 @@ def test_revoke_session_requires_approval_for_patient_care_target(mock_groq) -> 
     [
       {
         "action": "REVOKE_SESSION",
-        "target": "infusion-pump-gateway-04",
-        "reason": "Revoke active sessions on the compromised medical device gateway."
+        "target": "session-7F31",
+        "reason": "Revoke the session identifier found in the authentication evidence."
       }
     ]
     </proposals>
@@ -267,13 +296,38 @@ def test_revoke_session_requires_approval_for_patient_care_target(mock_groq) -> 
         asset_criticality="High",
         affected_assets=["infusion-pump-gateway-04", "ehr-server-01"],
     )
+    state["raw_alerts"][0]["session_id"] = "session-7F31"
     result = response_planner_node(state)
 
     assert len(result["proposed_actions"]) == 1
     action = result["proposed_actions"][0]
     assert action["action_type"] == "REVOKE_SESSION"
-    assert action["target"] == "infusion-pump-gateway-04"
+    assert action["target"] == "session-7F31"
     assert action["requires_approval"] is True
+
+
+def test_revoke_session_rejects_placeholder_without_evidence_backed_target(mock_groq) -> None:
+    mock_groq.response_content = """<proposals>[{
+        "action": "REVOKE_SESSION", "target": "system",
+        "reason": "Attempt to revoke the session."
+    }]</proposals>"""
+    state = _build_test_state(mitre_techniques=["T1486"], priority="Critical", risk_score=92)
+    result = response_planner_node(state)
+
+    assert all(action["action_type"] != "REVOKE_SESSION" for action in result["proposed_actions"])
+    assert any("placeholder targets are not actionable" in error for error in result["errors"])
+
+
+def test_revoke_session_rejects_target_absent_from_evidence(mock_groq) -> None:
+    mock_groq.response_content = """<proposals>[{
+        "action": "REVOKE_SESSION", "target": "user@example.org",
+        "reason": "Attempt to revoke this account session."
+    }]</proposals>"""
+    state = _build_test_state(mitre_techniques=["T1486"], priority="Critical", risk_score=92)
+    result = response_planner_node(state)
+
+    assert all(action["action_type"] != "REVOKE_SESSION" for action in result["proposed_actions"])
+    assert any("not a concrete account or session identifier" in error for error in result["errors"])
 
 
 def test_effective_requires_approval_elevates_patient_care_targets() -> None:
@@ -301,6 +355,47 @@ def test_effective_requires_approval_elevates_patient_care_targets() -> None:
 
     assert _effective_requires_approval(action_meta, "infusion-pump-gateway-04", incident) is True
     assert _effective_requires_approval(action_meta, "SOC team", incident) is False
+
+
+@pytest.mark.parametrize(
+    "action_name",
+    [
+        "BLOCK_IP",
+        "BLOCK_SSH",
+        "DROP_CONNECTION",
+        "RESET_MFA",
+        "REVOKE_SESSION",
+        "ISOLATE_ENDPOINT",
+        "DISABLE_ACCOUNT",
+        "KILL_PROCESS",
+        "PATCH_SYSTEM",
+        "RELOAD_RULES",
+        "ADD_RULE",
+    ],
+)
+def test_disruptive_actions_always_require_human_approval(action_name: str) -> None:
+    incident = Incident.from_state(
+        {
+            "incident_id": "INC-APPROVAL-POLICY",
+            "timestamp": "2026-07-08T16:00:00Z",
+            "incident_title": "Test",
+            "incident_category": "intrusion",
+            "incident_status": "investigating",
+            "schema_version": "1.0.0",
+            "source": "simulated",
+            "severity": 8,
+            "asset_criticality": "Low",
+            "affected_assets": ["lab-target"],
+        }
+    )
+    action_meta = {
+        "name": action_name,
+        "requires_approval": False,
+        "asset_criticality_restrictions": [],
+        "risk_tier": 2,
+    }
+
+    assert _effective_requires_approval(action_meta, "lab-target", incident) is True
 
 
 def test_mismatch_criticality_divergence_low_priority_proposes_tier3(mock_groq) -> None:

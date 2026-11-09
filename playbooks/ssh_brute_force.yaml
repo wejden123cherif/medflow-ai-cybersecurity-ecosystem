@@ -38,7 +38,8 @@
 #   Tier 2: BLOCK_SSH, DROP_CONNECTION
 #           — BLOCK_SSH is port-scoped (only TCP/22); DROP_CONNECTION forces
 #             the current active session to be terminated via Suricata.
-#             Neither requires approval; both are reversible.
+#             Both require explicit human approval. DROP_CONNECTION currently
+#             stages a persistent Suricata rule and has no verified rollback.
 #   Tier 2: RESET_MFA, REVOKE_SESSION (requires approval)
 #           — interrupts active clinical sessions; cannot be automated.
 #   Tier 3: ISOLATE_ENDPOINT (requires approval, restricted on High/Critical)
@@ -105,11 +106,11 @@ actions:
     # Capture /var/log/auth.log snapshot and active SSH session list
     # to document the attack scope and evidence chain for investigation.
 
-  # ── Tier 2: Network containment (reversible, no approval required) ─────────────
+  # ── Tier 2: Network containment (explicit human approval required) ─────────────
 
   - name: BLOCK_SSH
     risk_tier: 2
-    requires_approval: false
+    requires_approval: true
     reversible: true
     asset_criticality_restrictions: []
     # Port-scoped iptables block: -p tcp --dport 22 -s <attacker_ip> -j DROP
@@ -120,12 +121,11 @@ actions:
 
   - name: DROP_CONNECTION
     risk_tier: 2
-    requires_approval: false
-    reversible: true
+    requires_approval: true
+    reversible: false
     asset_criticality_restrictions: []
-    # Forces the active attacker SSH session to terminate via Suricata drop rule.
-    # Complements BLOCK_SSH: BLOCK_SSH prevents future connections;
-    # DROP_CONNECTION kills the current in-progress session immediately.
+    # Stages a persistent Suricata drop rule. This does not terminate an
+    # established session and has no implemented removal/rollback operation.
 
   # ── Tier 2: Identity controls (approval required — interrupts active sessions) ──
 

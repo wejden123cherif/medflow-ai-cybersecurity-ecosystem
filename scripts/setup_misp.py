@@ -9,7 +9,7 @@ TEST_IOC = "185.220.101.45"
 
 def parse_verify_ssl(value: str | None) -> bool:
     if value is None:
-        return False
+        return True
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -51,7 +51,7 @@ def main() -> int:
 
     misp_url = os.getenv("MISP_URL", "https://localhost").strip()
     misp_api_key = os.getenv("MISP_API_KEY", "").strip()
-    verify_ssl = parse_verify_ssl(os.getenv("MISP_VERIFY_SSL", "false"))
+    verify_ssl = parse_verify_ssl(os.getenv("MISP_VERIFY_SSL", "true"))
 
     if not misp_api_key:
         print("MISP_API_KEY is missing.")
@@ -75,7 +75,7 @@ def main() -> int:
         print("- Confirm MISP is running in Docker.")
         print("- For MedFlow on the Windows host, use MISP_URL=https://localhost.")
         print("- For MedFlow inside the same Docker network, use MISP_URL=https://misp-core.")
-        print("- For local self-signed certificates, use MISP_VERIFY_SSL=false.")
+        print("- Configure a trusted CA for local MISP certificates; certificate verification remains enabled.")
         print("- Confirm MISP_API_KEY is valid.")
         return 1
 

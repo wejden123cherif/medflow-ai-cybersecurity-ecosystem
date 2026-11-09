@@ -21,6 +21,22 @@ from playbooks.loader import is_action_permitted, load_all_playbooks, playbook_b
 
 PLAYBOOKS_DIR = ROOT_DIR / "playbooks"
 
+# These actions can interrupt traffic, access, or system operation. They always
+# require an explicit human decision, regardless of the playbook's suggestion.
+HUMAN_APPROVAL_ACTIONS = frozenset({
+    "BLOCK_IP",
+    "BLOCK_SSH",
+    "DROP_CONNECTION",
+    "RESET_MFA",
+    "REVOKE_SESSION",
+    "ISOLATE_ENDPOINT",
+    "DISABLE_ACCOUNT",
+    "KILL_PROCESS",
+    "PATCH_SYSTEM",
+    "RELOAD_RULES",
+    "ADD_RULE",
+})
+
 
 SYSTEM_PROMPT = """You are the MedFlow AI Response Planner Agent.
 Your job is to select a subset of permitted response actions from the provided playbook.
@@ -111,7 +127,8 @@ def _effective_requires_approval(
     incident level, but still require human approval when the target is a
     patient-care asset (consistent with ISOLATE_ENDPOINT safety posture).
     """
-    if bool(action_meta.get("requires_approval")):
+    action_name = str(action_meta.get("name") or action_meta.get("action_type") or "").upper()
+    if bool(action_meta.get("requires_approval")) or action_name in HUMAN_APPROVAL_ACTIONS:
         return True
     if not _target_is_patient_care(target, incident):
         return False
@@ -126,6 +143,7 @@ def _final_validate_action(
     action_name: str,
     target: str,
     asset_criticality: str,
+    state: IncidentState | None = None,
 ) -> tuple[bool, str]:
     action_meta = {action["name"]: action for action in playbook.get("actions", [])}
     if action_name not in action_meta:
@@ -136,13 +154,33 @@ def _final_validate_action(
         return False, f"action is restricted for asset_criticality='{asset_criticality}'"
     if not str(target or "").strip():
         return False, "action target is empty"
+    if action_name == "REVOKE_SESSION":
+        normalized_target = str(target).strip().casefold()
+        if normalized_target in {"system", "unknown", "none", "null", "n/a", "na"}:
+            return False, "REVOKE_SESSION requires an evidence-backed account or session identifier; placeholder targets are not actionable"
+        target_fields = {
+            "username", "user_name", "user", "account", "account_name",
+            "account_id", "user_id", "session", "session_id", "session_identifier",
+        }
+        evidenced_targets = {
+            str(value).strip().casefold()
+            for alert in (state or {}).get("raw_alerts", []) or []
+            for key, value in alert.items()
+            if str(key).casefold() in target_fields and str(value or "").strip()
+        }
+        if normalized_target not in evidenced_targets:
+            return False, "REVOKE_SESSION target is not a concrete account or session identifier present in incident evidence"
     return True, "ok"
 
 
 def _malicious_external_ips(state: IncidentState) -> list[str]:
+    scoped_alert_ids = set((state.get("campaign") or {}).get("correlated_alert_ids") or [])
+    if not scoped_alert_ids:
+        return []
     return sorted({
         str(ioc.get("source_ip", ""))
         for ioc in state.get("enriched_iocs", []) or []
+        if str(ioc.get("alert_id", "")) in scoped_alert_ids
         if ioc.get("source_ip")
         and not str(ioc.get("source_ip", "")).startswith(("10.", "172.", "192.168.", "127.", "0."))
         and str(ioc.get("source_ip", "")) not in ("", "unknown")
@@ -245,16 +283,20 @@ def response_planner_node(state: IncidentState) -> dict[str, Any]:
     }
 
     print(f"[Response Planner] Using playbook {matched_playbook} {incident.playbook_version}")
-    try:
-        response_text = _query_llm(
-            json.dumps(allowed_actions, indent=2),
-            json.dumps(incident_context, indent=2),
-            settings,
-        )
-        proposals = _extract_proposals(response_text, errors)
-    except Exception as exc:
-        errors.append(f"[Response Planner] LLM planning unavailable; using deterministic fallback: {exc}")
+    if not settings.groq_api_key:
         proposals = _fallback_proposals(playbook, incident, state)
+        print("[Response Planner] Groq key unavailable; using deterministic fallback")
+    else:
+        try:
+            response_text = _query_llm(
+                json.dumps(allowed_actions, indent=2),
+                json.dumps(incident_context, indent=2),
+                settings,
+            )
+            proposals = _extract_proposals(response_text, errors)
+        except Exception as exc:
+            errors.append(f"[Response Planner] LLM planning unavailable; using deterministic fallback: {exc}")
+            proposals = _fallback_proposals(playbook, incident, state)
 
     valid_actions: list[ResponseAction] = []
     for proposal in proposals:
@@ -268,6 +310,7 @@ def response_planner_node(state: IncidentState) -> dict[str, Any]:
             action_name,
             target,
             incident.asset_criticality,
+            state,
         )
         if not is_valid:
             requires_human_review = True

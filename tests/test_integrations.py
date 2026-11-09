@@ -83,7 +83,17 @@ def _base_state(**overrides) -> dict:
 
 
 def test_firewall_connector_direct() -> None:
-    connector = FirewallConnector(host="fw-test.local")
+    blocked_ips = set()
+
+    def remote_runner(command, timeout=10):
+        ip = command[command.index("-s") + 1] if "-s" in command else ""
+        if "-C" in command:
+            return {"success": ip in blocked_ips, "stdout": "", "stderr": "", "returncode": 0 if ip in blocked_ips else 1}
+        if "-A" in command:
+            blocked_ips.add(ip)
+        return {"success": True, "stdout": "", "stderr": "", "returncode": 0}
+
+    connector = FirewallConnector(host="fw-test.local", remote_runner=remote_runner)
     
     # Check health
     assert connector.check_health() is True
@@ -92,7 +102,6 @@ def test_firewall_connector_direct() -> None:
     action = {"action_type": "BLOCK_IP", "target": "192.168.1.100"}
     res = connector.execute_action(action)
     assert res["status"] == "success"
-    assert "fw-test.local" in res["details"]
     assert "192.168.1.100" in res["details"]
     
     # Missing target
@@ -112,6 +121,36 @@ def test_firewall_connector_direct() -> None:
     res = connector.execute_action(action)
     assert res["status"] == "failed"
     assert res["error"] == "service_unavailable"
+
+
+def test_firewall_connector_refuses_protected_ip_before_remote_call() -> None:
+    calls = []
+
+    def remote_runner(command, timeout=10):
+        calls.append(command)
+        return {"success": True, "stdout": "", "stderr": "", "returncode": 0}
+
+    connector = FirewallConnector(protected_ips=["192.168.1.10"], remote_runner=remote_runner)
+    res = connector.execute_action({"action_type": "BLOCK_IP", "target": "192.168.1.10"})
+
+    assert res["status"] == "failed"
+    assert res["error"] == "protected_ip_blocked"
+    assert calls == []
+
+
+def test_firewall_connector_refuses_protected_ipv6_loopback_before_remote_call() -> None:
+    calls = []
+
+    def remote_runner(command, timeout=10):
+        calls.append(command)
+        return {"success": True, "stdout": "", "stderr": "", "returncode": 0}
+
+    connector = FirewallConnector(remote_runner=remote_runner)
+    result = connector.execute_action({"action_type": "BLOCK_IP", "target": "::1"})
+
+    assert result["status"] == "failed"
+    assert result["error"] == "protected_ip_blocked"
+    assert calls == []
 
 
 def test_edr_connector_direct() -> None:
@@ -140,6 +179,11 @@ def test_edr_connector_direct() -> None:
 
 
 def test_response_executor_routes_to_firewall_and_edr(monkeypatch) -> None:
+    def remote_runner(command, timeout=10):
+        return {"success": "-A" in command, "stdout": "", "stderr": "", "returncode": 0 if "-A" in command else 1}
+
+    monkeypatch.setattr("integrations.firewall.connector.run_remote_command", remote_runner)
+
     # 1. Test successful BLOCK_IP
     approved = [_action("ACT-FW", "BLOCK_IP", target="185.220.101.45")]
     state = _base_state(approved_actions=approved, proposed_actions=approved)

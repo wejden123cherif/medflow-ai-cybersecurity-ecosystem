@@ -1,0 +1,1 @@
+alert tcp any any -> any 2222 (msg:"MEDFLOW LAB Repeated SSH Connection Attempts"; flags:S; threshold:type threshold,track by_src,count 5,seconds 60; classtype:attempted-admin; sid:9900003; rev:1;)

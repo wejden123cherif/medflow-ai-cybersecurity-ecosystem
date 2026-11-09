@@ -192,23 +192,40 @@ def investigate(
     with_response: bool = False,
     with_approval: bool = False,
     execute_response: bool = False,
+    export_handoff: str | None = None,
+    investigate_only: bool = False,
 ) -> None:
-    from graphs.threat_intel_graph import run_threat_intel
+    import json
+    from medflow_executor import run_execution
+    from medflow_investigator import run_investigation
     from playbooks.loader import load_all_playbooks, playbook_by_id
 
     # If scenario_file is provided, force scenario to 'live' to run live-first logic
     actual_scenario = "live" if scenario_file else scenario
     response_requested = with_response or with_approval or execute_response
     approval_requested = with_approval or execute_response or with_response
-    execution_requested = execute_response or with_response
+    execution_requested = (execute_response or with_response) and not investigate_only
 
-    final_state = run_threat_intel(
+    investigation_result = run_investigation(
         actual_scenario,
         scenario_file=scenario_file,
         with_response=response_requested,
         with_approval=approval_requested,
-        with_execution=execution_requested,
+        # CLI response options prepare and preview actions; live execution is disabled here.
+        with_execution=False,
     )
+
+    if export_handoff:
+        with open(export_handoff, "w", encoding="utf-8") as f:
+            json.dump(investigation_result.handoff.to_dict(), f, indent=2)
+        print(f"\n[Investigator] Handoff contract exported to {export_handoff}")
+
+    if investigate_only:
+        print("\n[Investigator] Investigation phase complete (--investigate-only set, skipping execution phase).")
+        final_state = investigation_result.investigation_state
+    else:
+        execution_result = run_execution(investigation_result)
+        final_state = execution_result.final_state
     campaign = final_state.get("campaign", {})
     prediction = final_state.get("prediction", {})
     collection_metadata = final_state.get("collection_metadata", {})
@@ -395,6 +412,41 @@ def investigate(
             print(f"  - {error}")
 
 
+def execute_standalone(handoff_file: str) -> None:
+    import json
+    from medflow_contracts import InvestigationHandoff
+    from medflow_executor import run_execution
+
+    print(f"[Executor] Loading InvestigationHandoff JSON contract from {handoff_file}...")
+    with open(handoff_file, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    handoff = InvestigationHandoff.from_dict(payload)
+    if not handoff.response_dry_run:
+        raise RuntimeError("Live execution is disabled in the CLI; provide a dry-run handoff.")
+    execution_result = run_execution(handoff)
+    final_state = execution_result.final_state
+
+    print("\n" + "=" * 60)
+    print("EXECUTION SUMMARY")
+    print("=" * 60)
+    print(f"Incident ID: {handoff.incident_id}")
+    print(f"Response Dry Run: {handoff.response_dry_run}")
+    print(f"Approved Actions: {len(handoff.approved_actions)}")
+    print(f"Acknowledged Actions: {len(handoff.acknowledged_actions)}")
+    print(f"Rejected Actions: {len(handoff.rejected_actions)}")
+
+    executed = final_state.get("executed_actions", [])
+    failed = final_state.get("failed_actions", [])
+    summary = final_state.get("execution_summary", {})
+
+    print(f"Execution results: total={summary.get('total', 0)} successful={summary.get('successful', 0)} failed={summary.get('failed', 0)} skipped={summary.get('skipped', 0)}")
+    for action in executed:
+        print(f"  [SUCCESS] {action.get('action_type')} -> {action.get('target')}")
+    for action in failed:
+        print(f"  [FAILED] {action.get('action_type')} -> {action.get('target')}: {action.get('error')}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="MedFlow AI Cybersecurity Ecosystem")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -421,6 +473,11 @@ def main() -> None:
     investigate_parser.add_argument("--with-response", action="store_true", help="Run the full response flow: planner, interactive approval gate, and dry-run executor.")
     investigate_parser.add_argument("--with-approval", action="store_true", help="Include response planning and block for human approval decisions.")
     investigate_parser.add_argument("--execute-response", action="store_true", help="Run the safe dry-run response executor after approval.")
+    investigate_parser.add_argument("--investigate-only", action="store_true", help="Run only the investigator pipeline and skip the executor.")
+    investigate_parser.add_argument("--export-handoff", help="Export JSON InvestigationHandoff contract to file.")
+
+    execute_parser = subparsers.add_parser("execute", help="Run Executor independently from a saved InvestigationHandoff JSON file.")
+    execute_parser.add_argument("--handoff", required=True, help="Path to InvestigationHandoff JSON file.")
 
     args = parser.parse_args()
     if args.command == "status":
@@ -438,7 +495,11 @@ def main() -> None:
             with_response=args.with_response,
             with_approval=args.with_approval,
             execute_response=args.execute_response,
+            export_handoff=args.export_handoff,
+            investigate_only=args.investigate_only,
         )
+    elif args.command == "execute":
+        execute_standalone(args.handoff)
 
 
 if __name__ == "__main__":

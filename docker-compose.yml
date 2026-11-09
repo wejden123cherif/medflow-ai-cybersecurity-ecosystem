@@ -11,8 +11,8 @@ services:
       MEDFLOW_ENV: ${MEDFLOW_ENV:-production}
       PYTHONUNBUFFERED: "1"
       GROQ_API_KEY: ${GROQ_API_KEY}
-      GROQ_MAIN_MODEL: ${GROQ_MAIN_MODEL:-qwen/qwen3-32b}
-      GROQ_SECONDARY_MODEL: ${GROQ_SECONDARY_MODEL:-llama-3.1-8b-instant}
+      GROQ_MAIN_MODEL: ${GROQ_MAIN_MODEL:-openai/gpt-oss-120b}
+      GROQ_SECONDARY_MODEL: ${GROQ_SECONDARY_MODEL:-openai/gpt-oss-20b}
       MEDFLOW_EMBEDDING_MODEL: ${MEDFLOW_EMBEDDING_MODEL:-BAAI/bge-base-en-v1.5}
       WAZUH_URL: ${WAZUH_URL:-https://wazuh.manager:55000}
       WAZUH_USER: ${WAZUH_USER:-wazuh-wui}
@@ -20,6 +20,7 @@ services:
       WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-https://wazuh.indexer:9200}
       WAZUH_INDEXER_USER: ${WAZUH_INDEXER_USER:-admin}
       WAZUH_INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-SecretPassword}
+      SURICATA_EVE_PATH: /app/suricata/lab-logs/eve.json
     ports:
       - "${MEDFLOW_PORT:-8000}:8000"
     depends_on:
@@ -31,6 +32,7 @@ services:
       - medflow_vector_dbs:/app/vector_dbs
       - medflow_cache:/app/.cache
       - medflow_logs:/app/logs
+      - ./suricata/lab-logs:/app/suricata/lab-logs:ro
     networks:
       - medflow-net
     healthcheck:
@@ -62,13 +64,13 @@ services:
     environment:
       - INDEXER_URL=https://wazuh.indexer:9200
       - INDEXER_USERNAME=admin
-      - INDEXER_PASSWORD=SecretPassword
+      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD:?set_WAZUH_INDEXER_PASSWORD_in_.env}
       - FILEBEAT_SSL_VERIFICATION_MODE=full
       - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
       - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
       - SSL_KEY=/etc/ssl/filebeat.key
       - API_USERNAME=wazuh-wui
-      - API_PASSWORD=MyS3cr37P450r.*-
+      - API_PASSWORD=${WAZUH_PASSWORD:?set_WAZUH_PASSWORD_in_.env}
     ports:
       - "1514:1514"
       - "1515:1515"
@@ -100,12 +102,12 @@ services:
       - wazuh.manager
     environment:
       - INDEXER_USERNAME=admin
-      - INDEXER_PASSWORD=SecretPassword
+      - INDEXER_PASSWORD=${WAZUH_INDEXER_PASSWORD:?set_WAZUH_INDEXER_PASSWORD_in_.env}
       - WAZUH_API_URL=https://wazuh.manager
       - DASHBOARD_USERNAME=kibanaserver
-      - DASHBOARD_PASSWORD=kibanaserver
+      - DASHBOARD_PASSWORD=${WAZUH_DASHBOARD_PASSWORD:?set_WAZUH_DASHBOARD_PASSWORD_in_.env}
       - API_USERNAME=wazuh-wui
-      - API_PASSWORD=MyS3cr37P450r.*-
+      - API_PASSWORD=${WAZUH_PASSWORD:?set_WAZUH_PASSWORD_in_.env}
     ports:
       - "8443:5601"
     networks:

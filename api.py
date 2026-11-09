@@ -17,8 +17,10 @@ def trigger_investigation(alert_data: dict):
         final_state = run_threat_intel(
             scenario_name="live",
             with_response=True,
-            with_approval=False,
-            with_execution=True
+            # A background webhook has no human approval UI. Keep response
+            # actions approval-gated and leave execution in dry-run mode.
+            with_approval=True,
+            with_execution=False,
         )
         logger.info(f"Investigation completed with risk score: {final_state.get('risk_score')}")
     except Exception as e:

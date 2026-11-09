@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
@@ -42,6 +42,12 @@ class Settings:
     soc_email: str
     email_mode: str  # "gmail" for real delivery, "mock" for localhost:1025 CI fallback
     protected_ips: list[str]
+    target_vm_host: str | None
+    target_vm_ssh_user: str | None
+    target_vm_ssh_key_path: str | None
+    soc_email_allowlist: list[str] = field(default_factory=list)
+    email_min_severity: int = 8
+    email_max_evidence_age_minutes: int = 15
 
 
 def resolve_embedding_model(model_name: str) -> str:
@@ -61,17 +67,25 @@ def load_settings() -> Settings:
     protected_ips = [ip.strip() for ip in protected_ips_raw.split(",") if ip.strip()]
     return Settings(
         groq_api_key=os.getenv("GROQ_API_KEY") or None,
-        main_model=os.getenv("GROQ_MAIN_MODEL", "qwen/qwen3-32b"),
-        secondary_model=os.getenv("GROQ_SECONDARY_MODEL", "llama-3.1-8b-instant"),
+        main_model=os.getenv("GROQ_MAIN_MODEL", "openai/gpt-oss-120b"),
+        secondary_model=os.getenv("GROQ_SECONDARY_MODEL", "openai/gpt-oss-20b"),
         embedding_model=resolve_embedding_model(embedding_model),
         smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
         smtp_port=int(os.getenv("SMTP_PORT", "587")),
         smtp_user=os.getenv("SMTP_USER") or None,
         smtp_password=os.getenv("SMTP_PASSWORD") or None,
         smtp_from=os.getenv("SMTP_FROM", "medflow-ai-soc@gmail.com"),
-        soc_email=os.getenv("SOC_EMAIL", "cherifwejden7@gmail.com"),
+        # No personal recipient is enabled by default; dispatch also requires an
+        # explicit match in SOC_EMAIL_ALLOWLIST.
+        soc_email=os.getenv("SOC_EMAIL", ""),
+        soc_email_allowlist=[address.strip().casefold() for address in os.getenv("SOC_EMAIL_ALLOWLIST", "").split(",") if address.strip()],
         email_mode=os.getenv("EMAIL_MODE", "gmail"),
         protected_ips=protected_ips,
+        target_vm_host=os.getenv("TARGET_VM_HOST") or None,
+        target_vm_ssh_user=os.getenv("TARGET_VM_SSH_USER") or None,
+        target_vm_ssh_key_path=os.getenv("TARGET_VM_SSH_KEY_PATH") or None,
+        email_min_severity=max(0, min(15, int(os.getenv("MEDFLOW_EMAIL_MIN_SEVERITY", "8")))),
+        email_max_evidence_age_minutes=max(1, min(1440, int(os.getenv("MEDFLOW_EMAIL_MAX_EVIDENCE_AGE_MINUTES", "15")))),
     )
 
 

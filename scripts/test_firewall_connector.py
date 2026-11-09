@@ -23,7 +23,12 @@ from integrations.firewall.connector import FirewallConnector
 class TestFirewallConnector(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.connector = FirewallConnector(protected_ips=["192.168.1.1", "10.0.0.1"])
+        self.connector = FirewallConnector(
+            protected_ips=["192.168.1.1", "10.0.0.1"],
+            remote_runner=lambda command, timeout=10: {
+                "success": True, "stdout": "", "stderr": "", "returncode": 0
+            },
+        )
 
     def test_health_check(self) -> None:
         self.assertTrue(self.connector.check_health())
@@ -49,37 +54,34 @@ class TestFirewallConnector(unittest.TestCase):
             self.assertEqual(res["error"], "protected_ip_blocked")
             self.assertIn("PROTECTED_IPS", res["details"])
 
-    @patch("integrations.firewall.connector.FirewallConnector._has_iptables", return_value=True)
-    @patch("subprocess.run")
-    def test_idempotent_skip(self, mock_run: MagicMock, mock_has_iptables: MagicMock) -> None:
+    @patch.object(FirewallConnector, "_run_remote")
+    def test_idempotent_skip(self, mock_run: MagicMock) -> None:
         """Verify that if iptables -C returns 0 (already blocked), no -A command is run."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": "", "returncode": 0}
 
         res = self.connector.execute_action({"action_type": "BLOCK_IP", "target": "198.51.100.44"})
         self.assertEqual(res["status"], "success")
         self.assertTrue(res.get("already_blocked"))
         self.assertIn("already blocked", res["details"])
 
-    @patch("integrations.firewall.connector.FirewallConnector._has_iptables", return_value=True)
-    @patch("subprocess.run")
-    def test_successful_rule_addition(self, mock_run: MagicMock, mock_has_iptables: MagicMock) -> None:
+    @patch.object(FirewallConnector, "_run_remote")
+    def test_successful_rule_addition(self, mock_run: MagicMock) -> None:
         """Verify successful iptables -A execution when rule does not exist."""
         mock_run.side_effect = [
-            MagicMock(returncode=1, stdout="", stderr="no matching rule"),
-            MagicMock(returncode=0, stdout="", stderr=""),
+            {"success": False, "returncode": 1, "stdout": "", "stderr": "no matching rule"},
+            {"success": True, "returncode": 0, "stdout": "", "stderr": ""},
         ]
 
         res = self.connector.execute_action({"action_type": "BLOCK_IP", "target": "198.51.100.55"})
         self.assertEqual(res["status"], "success")
         self.assertIn("Successfully blocked IP address 198.51.100.55", res["details"])
 
-    @patch("integrations.firewall.connector.FirewallConnector._has_iptables", return_value=True)
-    @patch("subprocess.run")
-    def test_unblock_ip_success(self, mock_run: MagicMock, mock_has_iptables: MagicMock) -> None:
+    @patch.object(FirewallConnector, "_run_remote")
+    def test_unblock_ip_success(self, mock_run: MagicMock) -> None:
         """Verify unblock_ip runs iptables -D when rule exists."""
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="", stderr=""),
+            {"success": True, "returncode": 0, "stdout": "", "stderr": ""},
+            {"success": True, "returncode": 0, "stdout": "", "stderr": ""},
         ]
 
         res = self.connector.unblock_ip("198.51.100.55")

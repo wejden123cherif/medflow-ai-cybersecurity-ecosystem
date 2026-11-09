@@ -195,13 +195,58 @@ def closure_node(state: IncidentState) -> dict[str, Any]:
     }
 
     # 5. Persist final incident state to SQLite store
+    notification_recipient = None
+    persisted = False
     try:
         from models.incident_store import IncidentStore
+        from integrations.email.incident_dispatch import eligible_recipient
         store = IncidentStore()
         merged_state = {**state, **out_state}
-        store.save_incident(merged_state)
+        try:
+            notification_recipient = eligible_recipient(merged_state)
+        except Exception as policy_exc:
+            # Configuration/policy failures must never block durable incident persistence.
+            logger.warning("SOC notification policy evaluation failed (%s).", type(policy_exc).__name__)
+            notification_recipient = None
+        if notification_recipient:
+            store.save_incident(merged_state, notification_recipient=notification_recipient)
+        else:
+            store.save_incident(merged_state)
+        persisted = True
+        # The live investigator may already have persisted/acknowledged these
+        # events before the approval workflow. This idempotent pass also covers
+        # executor-only handoffs that reached closure without that earlier save.
+        event_ids_by_source: dict[str, list[str]] = {"wazuh": [], "suricata": []}
+        for alert in state.get("raw_alerts") or []:
+            if not isinstance(alert, dict):
+                continue
+            source_type = str(alert.get("source_type") or "").lower()
+            event_id = str(alert.get("event_id") or alert.get("id") or "")
+            if source_type in event_ids_by_source and event_id:
+                event_ids_by_source[source_type].append(event_id)
+        for source_type, event_ids in event_ids_by_source.items():
+            if not event_ids:
+                continue
+            try:
+                if source_type == "wazuh":
+                    from collectors.wazuh import WazuhCollector
+                    acknowledged = WazuhCollector().acknowledge_event_ids(event_ids)
+                else:
+                    from collectors.suricata import SuricataCollector
+                    acknowledged = SuricataCollector().acknowledge_event_ids(event_ids)
+                logger.info("Acknowledged %d persisted %s alert event(s).", acknowledged, source_type)
+            except Exception as exc:
+                logger.warning("Could not acknowledge persisted %s alert events: %s", source_type, type(exc).__name__)
     except Exception as exc:
         logger.warning(f"Could not persist incident state in closure_node: {exc}")
+
+    if persisted and notification_recipient:
+        try:
+            from integrations.email.incident_dispatch import dispatch_pending_notifications
+            dispatch_pending_notifications(store, incident_id=str(state.get("incident_id") or ""))
+        except Exception as exc:
+            # Persistence and its notification outbox row have already committed.
+            logger.warning("Could not dispatch persisted incident notification (%s).", type(exc).__name__)
 
     return out_state
 

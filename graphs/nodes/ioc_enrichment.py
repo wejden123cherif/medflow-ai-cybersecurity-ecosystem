@@ -702,15 +702,15 @@ def _candidate_technique(alert: dict, raw_alerts: list[dict] | None = None) -> t
         return structural, 1.0
 
     # 3. Semantic fallback for alerts with no structural match
+    source_type = str(alert.get("source_type") or alert.get("source_system") or "").lower()
+    semantic_fields = (
+        ("event_type", "rule_description", "decoder")
+        if source_type == "suricata"
+        else ("event_type", "rule_description", "decoder", "full_log", "raw_log")
+    )
     text = " ".join(
         str(alert.get(field, ""))
-        for field in (
-            "event_type",
-            "rule_description",
-            "decoder",
-            "full_log",
-            "raw_log",
-        )
+        for field in semantic_fields
     ).lower().strip()
 
     if not text:
@@ -740,6 +740,10 @@ def _should_enable_cve_lookup(alert: dict) -> bool:
 
 
 def _alert_enrichment_cache_key(alert: dict, technique: str, cve_lookup_enabled: bool) -> tuple[str, ...]:
+    evidence_text = " ".join(
+        str(alert.get(field, "") or "") for field in ("event_type", "rule_description", "raw_log", "full_log")
+    )
+    cve_ids = ",".join(sorted(set(re.findall(r"CVE-\d{4}-\d{4,7}", evidence_text, flags=re.IGNORECASE))))
     return (
         str(technique or "").upper(),
         str(alert.get("source_ip", "") or "").strip(),
@@ -747,8 +751,28 @@ def _alert_enrichment_cache_key(alert: dict, technique: str, cve_lookup_enabled:
         str(alert.get("event_type", "") or "").strip(),
         str(alert.get("wazuh_rule_id", alert.get("rule_id", "")) or "").strip(),
         str(alert.get("decoder", "") or "").strip(),
-        str(alert.get("raw_log", "") or "").strip(),
+        cve_ids,
         str(cve_lookup_enabled),
+    )
+
+
+def _technique_candidate_cache_key(alert: dict) -> tuple[str, ...]:
+    """Key technique inference by the evidence it actually evaluates.
+
+    Live sensors commonly emit many distinct event IDs for the same rule and
+    signature. Re-running the embedding search for identical evidence needlessly
+    stalls a live investigation, so cache both matches and no-match results for
+    the duration of this node invocation.
+    """
+    return (
+        str(alert.get("source_type") or alert.get("source_system") or "").lower(),
+        _usable_technique_hint(alert).upper(),
+        "|".join(sorted(str(group).strip().lower() for group in (alert.get("rule_groups") or []))),
+        *(str(alert.get(field, "") or "").strip().lower() for field in (
+            ("event_type", "rule_description", "decoder")
+            if str(alert.get("source_type") or alert.get("source_system") or "").lower() == "suricata"
+            else ("event_type", "rule_description", "decoder", "full_log", "raw_log")
+        )),
     )
 
 
@@ -785,6 +809,9 @@ def ioc_enrichment_node(state: ThreatIntelState) -> dict:
     base_agent = create_react_agent(llm, base_tools)
     cve_agent = create_react_agent(llm, [*base_tools, lookup_cve])
     enrichment_cache: dict[tuple[str, ...], dict] = {}
+    technique_candidate_cache: dict[tuple[str, ...], tuple[str, float]] = {}
+    reported_technique_misses: set[tuple[str, ...]] = set()
+    unmatched_alert_count = 0
 
     for alert in state.get("raw_alerts", []):
         candidate_technique = ""
@@ -800,20 +827,28 @@ def ioc_enrichment_node(state: ThreatIntelState) -> dict:
                 errors.append(message)
                 continue
 
-            candidate_technique, technique_similarity = _candidate_technique(alert, state.get("raw_alerts", []))
+            technique_key = _technique_candidate_cache_key(alert)
+            cached_candidate = technique_candidate_cache.get(technique_key)
+            if cached_candidate is None:
+                cached_candidate = _candidate_technique(alert, state.get("raw_alerts", []))
+                technique_candidate_cache[technique_key] = cached_candidate
+            candidate_technique, technique_similarity = cached_candidate
             
             # Semantic fallback must clear the empirically calibrated threshold.
             if not candidate_technique or technique_similarity < MIN_TECHNIQUE_SIMILARITY:
-                alert_id = alert.get("id", "unknown")
-                rule_id = alert.get("wazuh_rule_id", alert.get("rule_id", "unknown"))
-                event_type = alert.get("event_type", alert.get("rule_description", "unknown"))
-                reason = "low similarity score" if candidate_technique else "no match found"
-                message = (
-                    f"[IOC Enrichment] Technique extraction failed for alert {alert_id} "
-                    f"(rule {rule_id}, event {event_type}) - {reason} ({technique_similarity:.2f}); skipping enrichment"
-                )
-                print(message)
-                errors.append(message)
+                unmatched_alert_count += 1
+                if technique_key not in reported_technique_misses:
+                    alert_id = alert.get("id", "unknown")
+                    rule_id = alert.get("wazuh_rule_id", alert.get("rule_id", "unknown"))
+                    event_type = alert.get("event_type", alert.get("rule_description", "unknown"))
+                    reason = "low similarity score" if candidate_technique else "no match found"
+                    message = (
+                        f"[IOC Enrichment] Technique extraction skipped for alert {alert_id} "
+                        f"(rule {rule_id}, event {event_type}) - {reason} ({technique_similarity:.2f})"
+                    )
+                    print(message)
+                    errors.append(message)
+                    reported_technique_misses.add(technique_key)
                 # Keep relevant telemetry in campaign scope when the evidence
                 # does not justify a confirmed ATT&CK technique. An
                 # unauthorized medical-device connection attempt is relevant,
@@ -1013,6 +1048,7 @@ Respond with ONLY valid JSON in this exact schema:
         )
     print(
         f"[IOC Enrichment] Complete - {len(enriched_iocs)} IOCs enriched | "
+        f"{unmatched_alert_count} alerts without a confident technique | "
         f"Average confidence: {average_confidence:.0%}"
     )
     return {

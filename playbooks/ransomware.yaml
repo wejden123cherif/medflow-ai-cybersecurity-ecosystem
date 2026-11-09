@@ -75,7 +75,7 @@ actions:
 
   - name: NOTIFY_SOC
     risk_tier: 1
-    requires_approval: false
+    requires_approval: true
     reversible: true
     asset_criticality_restrictions: []
     # Tier 1 — immediate SOC notification is always the first action;

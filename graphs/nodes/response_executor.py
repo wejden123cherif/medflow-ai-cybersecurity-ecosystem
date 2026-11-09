@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from graphs.state import IncidentState
+from graphs.nodes.response_planner import HUMAN_APPROVAL_ACTIONS
 from models.incident import Incident, ResponseAction
 
 
@@ -103,19 +104,13 @@ class ResponseExecutor:
             )
 
     def _notify_soc(self, action: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
-        if not self.email.check_health():
-            return _action_result(
-                action,
-                status="failed",
-                details="EmailConnector is unreachable or unconfigured.",
-                error="connector_unavailable",
-            )
-        res = self.email.execute_action(action, context)
+        # The durable incident outbox sends after closure persistence. Sending
+        # here could deliver before the incident record exists.
         return _action_result(
             action,
-            status=res["status"],
-            details=res["details"],
-            error=res.get("error", ""),
+            status="skipped",
+            details="Deferred to the automatic SOC notification policy after the incident is persisted; no email was sent by the response executor.",
+            error="deferred_until_persisted",
         )
 
     def _create_report(self, action: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -253,9 +248,11 @@ def _action_allowed_by_policy(action: dict[str, Any], allowed_actions: list[dict
 
 def _is_execution_eligible(action: dict[str, Any]) -> bool:
     decision = str(action.get("decision") or action.get("status") or "").lower()
-    requires_approval = bool(action.get("requires_approval"))
+    action_name = _action_name(action)
+    requires_approval = bool(action.get("requires_approval")) or action_name in HUMAN_APPROVAL_ACTIONS
     if requires_approval:
-        return decision == "approved"
+        approver = str(action.get("approved_by") or "").strip()
+        return decision == "approved" and bool(approver) and not approver.casefold().startswith("system:")
     return decision in {"acknowledged", "approved"}
 
 
@@ -343,6 +340,20 @@ def response_executor_node(state: IncidentState) -> dict[str, Any]:
                 status="skipped",
                 details="Action is not authorized by the resolved playbook policy.",
                 error="unauthorized_action",
+            )
+            _audit_execution(incident, event_type="ACTION_EXECUTION_SKIPPED", action=action, result=result)
+            results.append(result)
+            continue
+
+        # Live execution is limited to actions whose playbook declares a
+        # rollback path. A Suricata DROP_CONNECTION rule is currently appended
+        # persistently and has no corresponding removal operation.
+        if not dry_run and action.get("reversible") is not True:
+            result = _action_result(
+                action,
+                status="skipped",
+                details="Live execution is disabled for actions without a verified rollback path.",
+                error="rollback_not_available",
             )
             _audit_execution(incident, event_type="ACTION_EXECUTION_SKIPPED", action=action, result=result)
             results.append(result)

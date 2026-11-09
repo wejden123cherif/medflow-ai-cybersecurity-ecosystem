@@ -1,105 +1,47 @@
-# Wazuh + Suricata Deployment for MedFlow
+# Wazuh and Suricata deployment notes
 
-## Purpose
+This document describes the source paths and the lab evidence that has been reported. It does not claim that a live AI investigation, automatic incident email, or containment has completed end to end.
 
-Document the deployment steps and validation for ingesting Suricata `eve.json` into Wazuh and confirming MedFlow can consume alerts without any code changes.
+## Deployment boundaries
 
-## Architecture
+- The root `docker-compose.yml` includes optional Wazuh services and a Suricata service intended for a Linux host. The Suricata service uses host networking, which does not provide equivalent packet capture on Docker Desktop for Windows.
+- The Windows SSH lab and dedicated Suricata sensor may be separate, user-maintained Compose projects. Their definitions and credentials are not included in this repository.
+- A local upstream Wazuh Docker clone may exist at `wazuh/wazuh-docker/`; the clone and its generated TLS material are excluded from Git. Do not commit private keys, certificates, passwords, or raw event logs from that deployment.
+- MISP is configured as an optional external service; the root Compose file does not start it.
 
-- Wazuh single-node stack is deployed from `wazuh/wazuh-docker/single-node/docker-compose.yml`.
-- The Wazuh manager container mounts Suricata logs from the repository path `suricata/logs`.
-- Wazuh is configured to read Suricata JSON alerts from `/var/log/suricata/eve.json` using the Wazuh localfile JSON input.
-- MedFlow uses its existing Wazuh collector configuration in `.env` to query the Wazuh manager and indexer.
+## Suricata EVE paths
 
-## Key Configuration
+For the isolated Windows lab, the observed host file is `suricata/lab-logs/eve.json`. The root MedFlow service configuration points to `/app/suricata/lab-logs/eve.json` and mounts the host lab log directory read-only at `/app/suricata/lab-logs`.
 
-### Wazuh manager compose mount
+The Linux-oriented root Suricata configuration may instead write `suricata/logs/eve.json`. Do not assume those are the same sensor or data source. Confirm which EVE file belongs to the active lab sensor before investigating it. The MedFlow collector reads complete JSONL records and maintains its own offset and pending-event checkpoint.
 
-In `wazuh/wazuh-docker/single-node/docker-compose.yml`, the manager service mounts Suricata logs:
+## Wazuh configuration
 
-```yaml
-      - ../../../suricata/logs:/var/log/suricata:ro
+The MedFlow process uses `WAZUH_URL`, `WAZUH_USER`, `WAZUH_PASSWORD`, `WAZUH_INDEXER_URL`, and the Indexer credentials from local environment configuration. The collector uses bounded, read-only alert queries. Keep TLS verification enabled; use `WAZUH_CA_BUNDLE` only for a trusted CA file readable at the configured path. Do not paste credentials into documentation, shell transcripts, or logs.
+
+The Wazuh manager must be configured to read the correct EVE path if Suricata events are also being forwarded through Wazuh. The tracked manager template is `wazuh/config/wazuh_manager.conf`; local external Compose mounts may differ and must be checked against the active deployment before changing or restarting Wazuh.
+
+## Reported lab evidence
+
+- A genuine SSH authentication failure matched Wazuh rule `5760` and was visible in the Wazuh Dashboard.
+- The dedicated lab Suricata sensor produced SID `9900003`. This rule signals repeated SSH connection activity and does not independently prove failed authentication.
+- Local read-only MedFlow ingestion retrieved Wazuh alerts and Suricata signature `1:9900003:1`.
+- The MedFlow container was verified to read the lab EVE path through a read-only bind mount.
+
+These checks verify sensor/collector access, not incident correlation, incident persistence, automatic SMTP delivery, or live containment. Verify each of those separately before describing the project as end-to-end operational.
+
+## Safe verification
+
+Validate the Compose file without changing services:
+
+```powershell
+docker compose config --quiet
 ```
 
-### Wazuh manager JSON ingestion config
+Check the app health endpoint:
 
-In `wazuh/wazuh-docker/single-node/config/wazuh_cluster/wazuh_manager.conf`, add a localfile block for Suricata:
-
-```xml
-  <localfile>
-    <log_format>json</log_format>
-    <location>/var/log/suricata/eve.json</location>
-    <alias>Suricata eve.json</alias>
-  </localfile>
+```powershell
+Invoke-RestMethod -Uri http://localhost:8000/health
 ```
 
-This tells Wazuh to consume Suricata alerts in JSON format from the mounted `eve.json` file.
-
-### MedFlow environment
-
-MedFlow reads Wazuh settings from `.env` via `config.py`.
-The relevant values are already configured as:
-
-```ini
-WAZUH_URL=https://localhost:56000
-WAZUH_USER=wazuh-wui
-WAZUH_PASSWORD=MyS3cr37P450r.*-
-WAZUH_INDEXER_URL=https://localhost:9200
-WAZUH_INDEXER_USER=admin
-WAZUH_INDEXER_PASSWORD=SecretPassword
-```
-
-No MedFlow Python code changes were required for this integration.
-
-## Deployment Steps
-
-1. Start the Wazuh single-node stack:
-   ```powershell
-   cd wazuh/wazuh-docker/single-node
-   docker compose up -d
-   ```
-
-2. Ensure Suricata is running and writing `eve.json` to `suricata/logs/eve.json`.
-
-3. Confirm the Wazuh manager has the Suricata logs mounted and can read the file.
-
-4. If Wazuh manager configuration was changed, restart the stack:
-   ```powershell
-   docker compose restart wazuh.manager
-   ```
-
-## Validation
-
-### Wazuh manager local alert ingestion
-
-Confirmed Suricata-originated alerts in the Wazuh alerts JSON log with decoded rule metadata:
-
-- `Suricata: Alert - MEDFLOW T1046 Network Service Scanning Attempt`
-- `Suricata: Alert - MEDFLOW-TEST ICMP Ping Detected`
-
-Example log entries were found in `/var/ossec/logs/alerts/alerts.json`.
-
-### Wazuh indexer API
-
-The indexer exposed alert indices and contained Suricata alerts in `wazuh-alerts-4.x-2026.07.20`.
-
-Recent indexed alert hits included Suricata signatures and rule groups:
-
-- `Suricata: Alert - MEDFLOW T1046 Network Service Scanning Attempt`
-- `Suricata: Alert - MEDFLOW-TEST ICMP Ping Detected`
-
-### MedFlow live investigation
-
-`python app.py investigate --scenario live --with-response` successfully executed and collected live alerts from Wazuh.
-
-Results showed:
-
-- `Data source: wazuh_live`
-- `Alerts collected: 21`
-- `Live alerts: 21`
-- Top risk alerts and a generated incident response plan were produced.
-
-## Notes
-
-- Wazuh manager API at `https://localhost:56000` may be unavailable if the Wazuh manager service is not yet ready; MedFlow falls back to querying the indexer when necessary.
-- Current verification demonstrates end-to-end alert ingestion and MedFlow consumption without altering MedFlow Python source code.
+The opt-in `scripts/verify_lab_ingestion.py` performs bounded read-only collection using temporary checkpoints. It requires `MEDFLOW_ENABLE_READ_ONLY_LAB_INGESTION=1` plus `--live-lab-read-only`, `--confirm-authorized-read-only`, and `--confirm-trusted-tls`; its `--max-events` and `--lookback-days` options bound collection. Review its help and the configured endpoint/CA before running it. It must not be used to generate traffic or invoke notifications/response actions.

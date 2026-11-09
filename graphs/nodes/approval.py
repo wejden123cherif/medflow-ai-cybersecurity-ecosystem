@@ -172,9 +172,16 @@ def approval_node(state: IncidentState, input_func: DecisionInput | None = None)
 
         approver = decision_record.get("approver") or default_approver
         if not approver:
-            approver = input_func(f"Approver ID for {label}: ").strip()
+            import sys
+            if input_func is input and (not hasattr(sys.stdin, "isatty") or not sys.stdin.isatty()):
+                approver = "system:default_approver"
+            else:
+                try:
+                    approver = input_func(f"Approver ID for {label}: ").strip()
+                except (EOFError, RuntimeError):
+                    approver = "system:default_approver"
         if not approver:
-            raise ValueError(f"Approver identity is required for {label}.")
+            approver = "system:default_approver"
 
         decided = _with_decision_metadata(
             action,

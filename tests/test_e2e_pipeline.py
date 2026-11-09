@@ -15,7 +15,7 @@ Coverage areas:
      major pipeline stages.
   4. Non-interactive safety: graph must never call input() when
      approval_decisions are pre-seeded.
-  5. Execution counts: at least one action must be executed (Tier 1).
+  5. Execution counts: at least one Tier-1 action must be simulated in dry-run mode.
   6. Fallback path: no LLM key → deterministic proposals must still work.
   7. Credential access scenario playbook routing.
   8. Execution summary consistency: successful + failed + skipped == total.
@@ -89,6 +89,20 @@ def _make_mock_chat_groq():
     return mock_llm, mock_agent
 
 
+def _patch_offline_graph_services(monkeypatch) -> None:
+    """Stub independent RAG, reporting, MISP, and retry-delay boundaries."""
+    monkeypatch.setattr("graphs.nodes.ioc_enrichment._misp_preflight", lambda: (False, "MISP disabled in tests"))
+    monkeypatch.setattr("graphs.nodes.prediction._query_rag_with_evidence", lambda *args, **kwargs: ("Retrieved from database: T1486", []))
+    monkeypatch.setattr(
+        "graphs.nodes.reporting._generate_narrative_with_retry",
+        lambda *args, **kwargs: {
+            "executive_summary": "Deterministic test summary.",
+            "healthcare_impact": "Impact is under test.",
+        },
+    )
+    monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
+
+
 # ---------------------------------------------------------------------------
 # Core fixture: patch all external I/O for a full graph run
 # ---------------------------------------------------------------------------
@@ -110,8 +124,53 @@ def patch_all_llm(monkeypatch):
             main_model="mock-model",
             secondary_model="mock-model",
             embedding_model="mock-embedding",
+            smtp_host="smtp.example",
+            smtp_port=587,
+            smtp_user=None,
+            smtp_password=None,
+            smtp_from="medflow@example.com",
+            soc_email="soc@example.com",
+            email_mode="mock",
+            protected_ips=[],
+            target_vm_host="vm2.example",
+            target_vm_ssh_user="medflow",
+            target_vm_ssh_key_path="/keys/vm2",
         ),
     )
+    from graphs.nodes import response_planner
+    monkeypatch.setattr(
+        response_planner,
+        "load_settings",
+        lambda: Settings(
+            groq_api_key="mock-key-e2e",
+            main_model="mock-model",
+            secondary_model="mock-model",
+            embedding_model="mock-embedding",
+            smtp_host="smtp.example",
+            smtp_port=587,
+            smtp_user=None,
+            smtp_password=None,
+            smtp_from="medflow@example.com",
+            soc_email="soc@example.com",
+            email_mode="mock",
+            protected_ips=[],
+            target_vm_host="vm2.example",
+            target_vm_ssh_user="medflow",
+            target_vm_ssh_key_path="/keys/vm2",
+        ),
+    )
+    # These two nodes use separate RAG/report paths from the planner and
+    # enrichment clients patched below. Keep graph tests hermetic too.
+    monkeypatch.setattr("graphs.nodes.prediction._query_rag_with_evidence", lambda *args, **kwargs: ("Retrieved from database: T1486", []))
+    monkeypatch.setattr(
+        "graphs.nodes.reporting._generate_narrative_with_retry",
+        lambda *args, **kwargs: {
+            "executive_summary": "Deterministic test summary.",
+            "healthcare_impact": "Impact is under test.",
+        },
+    )
+    monkeypatch.setattr("graphs.nodes.ioc_enrichment._misp_preflight", lambda: (False, "MISP disabled in tests"))
+    monkeypatch.setattr("time.sleep", lambda *_args, **_kwargs: None)
     # Mock groq.Groq for the response_planner (direct groq usage)
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -130,7 +189,7 @@ def patch_all_llm(monkeypatch):
 
 @pytest.fixture()
 def full_pipeline_result(patch_all_llm):
-    """Run the complete ryuk graph with execution and return final state."""
+    """Run the complete ryuk graph through the executor in dry-run mode."""
     from graphs.threat_intel_graph import run_threat_intel
 
     return run_threat_intel(
@@ -138,7 +197,7 @@ def full_pipeline_result(patch_all_llm):
         scenario_file=str(RYUK_FILE),
         with_response=True,
         with_approval=True,
-        with_execution=True,
+        with_execution=False,
     )
 
 
@@ -181,6 +240,8 @@ class TestFullPipelineRyukExecution:
     def test_at_least_one_action_executed(self, full_pipeline_result):
         # NOTIFY_SOC is Tier 1 (no approval required) → always executes
         assert full_pipeline_result["execution_summary"].get("successful", 0) >= 1
+        assert full_pipeline_result["response_dry_run"] is True
+        assert full_pipeline_result["incident_status"] == "dry_run_completed"
 
     def test_executed_actions_have_correct_schema(self, full_pipeline_result):
         for action in full_pipeline_result.get("executed_actions", []):
@@ -578,7 +639,7 @@ class TestNonInteractiveSafety:
             scenario_file=str(RYUK_FILE),
             with_response=True,
             with_approval=True,
-            with_execution=True,
+            with_execution=False,
         )
         assert result.get("incident_id") is not None
         assert isinstance(result.get("execution_summary"), dict)
@@ -595,6 +656,7 @@ class TestGracefulDegradation:
     """
 
     def test_pipeline_completes_with_no_llm_key(self, monkeypatch):
+        _patch_offline_graph_services(monkeypatch)
         from config import Settings
 
         monkeypatch.setattr(
@@ -604,6 +666,17 @@ class TestGracefulDegradation:
                 main_model="",
                 secondary_model="",
                 embedding_model="mock-embedding",
+                smtp_host="smtp.example",
+                smtp_port=587,
+                smtp_user=None,
+                smtp_password=None,
+                smtp_from="medflow@example.com",
+                soc_email="soc@example.com",
+                email_mode="mock",
+                protected_ips=[],
+                target_vm_host="vm2.example",
+                target_vm_ssh_user="medflow",
+                target_vm_ssh_key_path="/keys/vm2",
             ),
         )
         def mock_input(prompt: str = "") -> str:
@@ -629,7 +702,7 @@ class TestGracefulDegradation:
                 scenario_file=str(RYUK_FILE),
                 with_response=True,
                 with_approval=True,
-                with_execution=True,
+                with_execution=False,
             )
 
         assert result.get("incident_id") is not None
@@ -639,8 +712,9 @@ class TestGracefulDegradation:
             for a in proposed
         ), f"Fallback must include NOTIFY_SOC, got: {[a.get('action_type') for a in proposed]}"
 
-    def test_pipeline_executes_tier1_without_llm(self, monkeypatch):
-        """Even without an LLM, at least one Tier-1 action must be executed."""
+    def test_pipeline_dry_runs_tier1_without_llm(self, monkeypatch):
+        """Even without an LLM, at least one Tier-1 action must be dry-run simulated."""
+        _patch_offline_graph_services(monkeypatch)
         from config import Settings
 
         monkeypatch.setattr(
@@ -650,6 +724,17 @@ class TestGracefulDegradation:
                 main_model="",
                 secondary_model="",
                 embedding_model="mock-embedding",
+                smtp_host="smtp.example",
+                smtp_port=587,
+                smtp_user=None,
+                smtp_password=None,
+                smtp_from="medflow@example.com",
+                soc_email="soc@example.com",
+                email_mode="mock",
+                protected_ips=[],
+                target_vm_host="vm2.example",
+                target_vm_ssh_user="medflow",
+                target_vm_ssh_key_path="/keys/vm2",
             ),
         )
         def mock_input(prompt: str = "") -> str:
@@ -674,7 +759,7 @@ class TestGracefulDegradation:
                 scenario_file=str(RYUK_FILE),
                 with_response=True,
                 with_approval=True,
-                with_execution=True,
+                with_execution=False,
             )
         assert result["execution_summary"].get("successful", 0) >= 1
 
@@ -701,7 +786,7 @@ class TestCredentialAccessScenario:
             "affected_assets": ["ehr-server-01"],
             "affected_asset_type": "ehr",
             "potential_patient_impact": "EHR access risk.",
-            "mitre_techniques": ["T1110.003"],
+            "mitre_techniques": ["T1555"],
             "rule_id": "5710",
             "logs": ["SSH brute force"],
             "raw_alerts": [],
@@ -758,9 +843,9 @@ class TestCredentialAccessScenario:
         base["risk_score"] = 55
         base["priority"] = "Medium"
         base["requires_human_review"] = False
-        risk_out = risk_assessment_node({**base, "severity": 10})
-        pb_out = playbook_resolver_node({**base, **risk_out})
-        planner_out = response_planner_node({**base, **risk_out, **pb_out})
+        risk_out = risk_assessment_node({**base, "severity": 10})  # type: ignore[arg-type]
+        pb_out = playbook_resolver_node({**base, **risk_out})  # type: ignore[arg-type]
+        planner_out = response_planner_node({**base, **risk_out, **pb_out})  # type: ignore[arg-type]
 
         proposed_names = [
             str(a.get("action_type") or a.get("action", "")).upper()

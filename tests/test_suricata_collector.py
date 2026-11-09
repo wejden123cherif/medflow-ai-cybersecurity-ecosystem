@@ -20,9 +20,9 @@ def temp_eve_file():
 
 
 def test_suricata_collector_missing_file(monkeypatch) -> None:
-    collector = SuricataCollector()
-    # Temporarily force non-existent path
+    # Configure the path before constructing the collector.
     monkeypatch.setenv("SURICATA_EVE_PATH", "non_existent_file.json")
+    collector = SuricataCollector()
     alerts, metadata = collector.collect()
     assert alerts is None
     assert "failure_reason" in metadata
@@ -165,7 +165,7 @@ def test_collection_node_with_suricata_and_wazuh_unreachable(monkeypatch, temp_e
     # Since Suricata succeeded but Wazuh failed, collection_node should collect Suricata alerts
     # and NOT trigger a simulated fallback (because any_success is True and alerts were gathered!)
     result = collection_node(state)
-    assert result["source"] == "wazuh_live"
+    assert result["source"] == "suricata_live"
     assert len(result["raw_alerts"]) == 1
     assert result["raw_alerts"][0]["source_system"] == "suricata"
     
