@@ -38,7 +38,9 @@ IMPACT_EXFILTRATION_TECHNIQUES = {
     "T1485", "T1486", "T1489", "T1490", "T1491", "T1498", "T1529", "T1561",
 }
 PRE_COMPROMISE_POLICY = {
-    "credential_access_attempt": 3,
+    # Align the stage index with correlation.STAGE_BY_POSITION so T1110 maps
+    # to Credential Access rather than Execution.
+    "credential_access_attempt": 4,
     "failure_artifact": 3,
 }
 POSITION_BY_TECHNIQUE = {

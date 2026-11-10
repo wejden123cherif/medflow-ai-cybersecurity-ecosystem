@@ -224,7 +224,10 @@ def investigate(
         print("\n[Investigator] Investigation phase complete (--investigate-only set, skipping execution phase).")
         final_state = investigation_result.investigation_state
     else:
-        execution_result = run_execution(investigation_result)
+        if actual_scenario == "ssh_lab":
+            execution_result = run_execution(investigation_result, retry_notifications=False)
+        else:
+            execution_result = run_execution(investigation_result)
         final_state = execution_result.final_state
     campaign = final_state.get("campaign", {})
     prediction = final_state.get("prediction", {})
@@ -468,7 +471,7 @@ def main() -> None:
     compare_parser.add_argument("question")
 
     investigate_parser = subparsers.add_parser("investigate", help="Run the LangGraph threat investigation workflow.")
-    investigate_parser.add_argument("--scenario", default="ryuk", help="Scenario name to investigate.")
+    investigate_parser.add_argument("--scenario", default="ryuk", help="Scenario to investigate (use 'ssh_lab' for fresh rule 5760/SID 9900003 evidence only).")
     investigate_parser.add_argument("--file", help="Path to simulated alerts file (triggers wazuh-live-with-fallback test).")
     investigate_parser.add_argument("--with-response", action="store_true", help="Run the full response flow: planner, interactive approval gate, and dry-run executor.")
     investigate_parser.add_argument("--with-approval", action="store_true", help="Include response planning and block for human approval decisions.")

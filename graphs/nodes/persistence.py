@@ -55,15 +55,33 @@ def persist_live_incident_node(state: IncidentState) -> dict[str, Any]:
         "action": "INCIDENT_PERSISTED",
         "justification": "Live normalized evidence and risk assessment were saved before response planning or approval.",
     })
+    notifications_disabled = bool(metadata.get("notifications_disabled"))
+    preserve_checkpoints = bool(metadata.get("preserve_checkpoints"))
+    if notifications_disabled:
+        audit_log.append({
+            "actor": "system:incident_persistence_node",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "action": "NOTIFICATION_SUPPRESSED",
+            "justification": "The isolated SSH lab investigation disables all outgoing notifications.",
+        })
+    if preserve_checkpoints:
+        audit_log.append({
+            "actor": "system:incident_persistence_node",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "action": "COLLECTOR_CHECKPOINTS_PRESERVED",
+            "justification": "The isolated SSH lab validation leaves normal collector checkpoints unchanged.",
+        })
     persisted_state["audit_log"] = audit_log
 
     try:
-        from integrations.email.incident_dispatch import eligible_recipient
-        try:
-            recipient = eligible_recipient(persisted_state)
-        except Exception as exc:
-            logger.warning("SOC notification policy evaluation failed (%s).", type(exc).__name__)
-            recipient = None
+        recipient = None
+        if not notifications_disabled:
+            from integrations.email.incident_dispatch import eligible_recipient
+            try:
+                recipient = eligible_recipient(persisted_state)
+            except Exception as exc:
+                logger.warning("SOC notification policy evaluation failed (%s).", type(exc).__name__)
+                recipient = None
         if recipient:
             store.save_incident(persisted_state, notification_recipient=recipient)
         else:
@@ -73,7 +91,8 @@ def persist_live_incident_node(state: IncidentState) -> dict[str, Any]:
         return {}
 
     # The transaction and outbox row are durable before checkpoint or SMTP work.
-    acknowledge_persisted_events(state)
+    if not preserve_checkpoints:
+        acknowledge_persisted_events(state)
     if recipient:
         try:
             from integrations.email.incident_dispatch import dispatch_pending_notifications

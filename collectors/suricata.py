@@ -26,7 +26,7 @@ MAX_BATCH_RECORDS = 10000
 
 
 class SuricataCollector(BaseCollector):
-    def __init__(self) -> None:
+    def __init__(self, *, checkpoint_path: str | Path | None = None) -> None:
         self.eve_path = Path(os.getenv("SURICATA_EVE_PATH", DEFAULT_SURICATA_EVE_PATH)).expanduser()
         self.sensor_id = os.getenv("SURICATA_SENSOR_ID", "").strip() or None
         try:
@@ -34,7 +34,7 @@ class SuricataCollector(BaseCollector):
         except ValueError:
             max_records = MAX_BATCH_RECORDS
         self.max_records = min(max(max_records, 1), MAX_BATCH_RECORDS)
-        self.checkpoint_path = Path(os.getenv(
+        self.checkpoint_path = Path(checkpoint_path or os.getenv(
             "SURICATA_CHECKPOINT_PATH", str(ROOT_DIR / "data" / "collector-checkpoints" / "suricata.json")
         )).expanduser()
 
@@ -217,6 +217,9 @@ class SuricataCollector(BaseCollector):
                     "suricata_signature_id": str(signature_id) if signature_id is not None else None,
                     "suricata_gid": gid,
                     "suricata_revision": revision,
+                    "source_port": event.get("src_port"),
+                    "target_ip": event.get("dest_ip"),
+                    "target_port": event.get("dest_port"),
                     "signature_category": alert.get("category"),
                     "alert_action": alert.get("action"),
                     "flow_id": event.get("flow_id"),

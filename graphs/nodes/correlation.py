@@ -86,7 +86,11 @@ def _alert_timestamp(alert: dict) -> datetime | None:
 
 
 def _rule_groups(alert: dict) -> set[str]:
-    groups = alert.get("rule_groups") or alert.get("groups") or []
+    groups = alert.get("rule_groups") or alert.get("wazuh_rule_groups") or alert.get("groups") or []
+    if not groups:
+        evidence = alert.get("evidence") if isinstance(alert.get("evidence"), dict) else {}
+        rule = evidence.get("rule") if isinstance(evidence.get("rule"), dict) else {}
+        groups = rule.get("groups") or []
     if isinstance(groups, str):
         groups = [groups]
     return {str(group).strip().lower() for group in groups if str(group).strip()}
@@ -169,6 +173,19 @@ def _risk_score(alert: dict) -> int:
         return 0
 
 
+def _is_ssh_auth_signal(alert: dict) -> bool:
+    source = str(alert.get("source_type") or alert.get("source_system") or "").lower()
+    if source == "wazuh":
+        rule_id = str(alert.get("wazuh_rule_id") or alert.get("rule_id") or "")
+        evidence = alert.get("evidence") if isinstance(alert.get("evidence"), dict) else {}
+        decoder = evidence.get("decoder") if isinstance(evidence.get("decoder"), dict) else {}
+        decoder_name = str(alert.get("decoder") or decoder.get("name") or "").lower()
+        return rule_id == "5760" and ("authentication_failed" in _rule_groups(alert) or decoder_name == "sshd")
+    if source == "suricata":
+        return str(alert.get("suricata_signature_id") or "") == "9900003"
+    return False
+
+
 def _select_campaign_scope(
     raw_alerts: list[dict],
     enriched_iocs: list[dict],
@@ -178,12 +195,16 @@ def _select_campaign_scope(
     raw_by_id = _alert_by_id(raw_alerts)
     excluded: list[dict] = []
     records: list[dict] = []
+    ssh_auth_scope = any(_is_ssh_auth_signal(alert) for alert in raw_alerts)
 
     for ioc in enriched_iocs:
         alert_id = str(ioc.get("alert_id", ""))
         alert = raw_by_id.get(alert_id)
         if not alert:
             excluded.append({"alert_id": alert_id, "reason": "missing_raw_alert"})
+            continue
+        if ssh_auth_scope and not _is_ssh_auth_signal(alert):
+            excluded.append({"alert_id": alert_id, "reason": "outside_ssh_authentication_incident_scope"})
             continue
         if _is_wazuh_operational_noise(alert):
             excluded.append({"alert_id": alert_id, "reason": "wazuh_operational_noise"})
@@ -251,7 +272,7 @@ def _select_campaign_scope(
         "correlation_window_hours": window_hours,
         "excluded_alerts": excluded,
         "correlated_alert_ids": sorted(selected_ids),
-        "scope_reason": "time_and_host_scoped_primary_cluster",
+        "scope_reason": "ssh_authentication_scope_then_time_and_host" if ssh_auth_scope else "time_and_host_scoped_primary_cluster",
     }
 
 
@@ -320,10 +341,10 @@ def _stage_reasoning(
     highest_techniques: list[str],
 ) -> str:
     capitalized_tactics = [TACTIC_LABELS.get(t, t.title()) for t in observed_tactics]
-    technique_text = ", ".join(highest_techniques) if highest_techniques else "the confirmed evidence"
+    technique_text = ", ".join(highest_techniques) if highest_techniques else "the available evidence"
     return (
-        f"Confirmed techniques mapped to ATT&CK tactics: {', '.join(capitalized_tactics)}. "
-        f"The highest-position confirmed technique(s) are {technique_text} at kill chain position "
+        f"Scoped evidence maps to ATT&CK tactics: {', '.join(capitalized_tactics)}. "
+        f"The highest-position technique mapping is {technique_text} at kill chain position "
         f"{kill_chain_position}/7, so the campaign is currently assessed at {stage}."
     )
 
@@ -362,35 +383,106 @@ def _derive_stage_from_tactics(techniques: list[str], mitre_context: dict) -> tu
 
 
 def _compromise_confirmed(raw_alerts: list[dict], enriched_iocs: list[dict]) -> bool:
+    # A campaign containing an arbitrary file/service/persistence event is not
+    # sufficient to establish compromise. Require an explicit successful
+    # authentication signal; failures and network connection attempts remain
+    # attempts. Impact is assessed separately from impact-specific evidence.
     success_tokens = (
         "successful login",
         "successful logon",
         "login successful",
         "logon successful",
+        "accepted password",
         "session created",
         "session creation",
-        "privilege escalation",
-        "privileged",
-        "elevated",
-        "file modified",
-        "syscheck",
-        "checksum changed",
-        "persistence",
-        "scheduled task",
-        "registry",
-        "service installed",
-        "ransomware",
-        "encrypt",
     )
     for alert in raw_alerts:
         text = _alert_text(alert)
-        if any(token in text for token in success_tokens):
-            return True
-    for ioc in enriched_iocs:
-        technique_id = str(ioc.get("technique_confirmed", "")).upper()
-        if technique_id in {"T1078", "T1485", "T1486", "T1489", "T1490", "T1491", "T1498", "T1529", "T1561"}:
+        groups = _rule_groups(alert)
+        if "authentication_failed" in groups or any(
+            token in text for token in ("failed password", "authentication failed", "logon failure", "bad password")
+        ):
+            continue
+        if "authentication_success" in groups or any(token in text for token in success_tokens):
             return True
     return False
+
+
+def _impact_evidence_confirmed(raw_alerts: list[dict], enriched_iocs: list[dict]) -> bool:
+    """Impact needs an impact-specific observable, not merely compromise."""
+    impact_ids = {"T1485", "T1486", "T1489", "T1490", "T1491", "T1498", "T1529", "T1531", "T1561"}
+    impact_terms = (
+        "files encrypted", "file encryption", "ransom note", "shadow copies deleted",
+        "data encrypted", "mass encryption", "files rendered inaccessible",
+        "account disabled", "account removed", "account access removed",
+    )
+    evidence_ids = {
+        str(ioc.get("technique_confirmed", "")).upper()
+        for ioc in enriched_iocs
+        if ioc.get("technique_confirmed")
+    }
+    if not evidence_ids & impact_ids:
+        return False
+    return any(any(term in _alert_text(alert) for term in impact_terms) for alert in raw_alerts)
+
+
+def _cross_source_ssh_links(raw_alerts: list[dict]) -> list[dict]:
+    """Link Wazuh SSH auth failures to the lab's repeated-SSH Suricata rule.
+
+    The link requires the exact source IP, source TCP port, and event second;
+    the Wazuh host and Suricata destination/port are retained as context. A
+    Wazuh predecoder timestamp has no timezone, so it is recorded verbatim.
+    """
+    wazuh_events = []
+    suricata_events = []
+    for alert in raw_alerts:
+        evidence = alert.get("evidence") if isinstance(alert.get("evidence"), dict) else {}
+        data = evidence.get("data") if isinstance(evidence.get("data"), dict) else {}
+        predecoder = evidence.get("predecoder") if isinstance(evidence.get("predecoder"), dict) else {}
+        if str(alert.get("source_type", "")).lower() == "wazuh" and str(alert.get("wazuh_rule_id") or alert.get("rule_id")) == "5760":
+            if "authentication_failed" in _rule_groups(alert):
+                wazuh_events.append((alert, data, predecoder))
+        if str(alert.get("source_type", "")).lower() == "suricata" and str(alert.get("suricata_signature_id", "")) == "9900003":
+            suricata_events.append((alert, evidence))
+
+    links = []
+    for wazuh, data, predecoder in wazuh_events:
+        for suricata, evidence in suricata_events:
+            source_port = str(data.get("srcport") or "")
+            suricata_port = str(evidence.get("src_port") or "")
+            wazuh_second = str(predecoder.get("timestamp") or "")
+            suricata_second = str(suricata.get("source_event_timestamp") or "")
+            if suricata_second:
+                try:
+                    parsed = datetime.fromisoformat(suricata_second.replace("Z", "+00:00"))
+                    suricata_second = parsed.strftime("%b %d %H:%M:%S")
+                except ValueError:
+                    suricata_second = ""
+            if (
+                str(wazuh.get("source_ip") or "")
+                and wazuh.get("source_ip") == suricata.get("source_ip")
+                and source_port
+                and source_port == suricata_port
+                and wazuh_second
+                and wazuh_second == suricata_second
+            ):
+                links.append({
+                    "wazuh_event_id": str(wazuh.get("event_id") or wazuh.get("id")),
+                    "suricata_event_id": str(suricata.get("event_id") or suricata.get("id")),
+                    "rule": "same source IP + exact TCP source port + exact event second",
+                    "wazuh_rule_id": "5760",
+                    "suricata_signature_id": "9900003",
+                    "source_ip": wazuh.get("source_ip"),
+                    "source_port": source_port,
+                    "event_second": wazuh_second,
+                    "wazuh_target_host": predecoder.get("hostname"),
+                    "suricata_target_ip": evidence.get("dest_ip"),
+                    "suricata_target_port": evidence.get("dest_port"),
+                    "wazuh_timestamp_basis": "syslog predecoder; timezone not present",
+                    "suricata_timestamp_basis": "EVE event timestamp; UTC",
+                    "assessment": "Wazuh observed a failed authentication; Suricata observed repeated SSH connections. The Suricata event alone does not prove authentication failure or successful access.",
+                })
+    return links
 
 
 def _attack_type(raw_alerts: list[dict], enriched_iocs: list[dict], source_ip: str, compromise_confirmed: bool) -> str:
@@ -475,31 +567,40 @@ def correlation_node(state: ThreatIntelState) -> dict:
         print("[Correlation] No security-relevant campaign evidence after time/noise filtering")
         return {"campaign": campaign}
 
-    grouped_by_ip: dict[str, list[dict]] = defaultdict(list)
-    for ioc in enriched_iocs:
-        grouped_by_ip[str(ioc.get("source_ip", "Unknown"))].append(ioc)
-
-    timeline = sorted(
-        enriched_iocs,
-        key=lambda ioc: raw_by_id.get(str(ioc.get("alert_id")), {}).get("timestamp", ""),
-    )
-
-    compromise_confirmed = _compromise_confirmed(raw_alerts, enriched_iocs)
-    most_common_source_ip = _most_common([str(ioc.get("source_ip", "")) for ioc in enriched_iocs])
-    attack_type = _attack_type(raw_alerts, enriched_iocs, most_common_source_ip, compromise_confirmed)
-
+    impact_confirmed = _impact_evidence_confirmed(raw_alerts, enriched_iocs)
     technique_ids = [
         str(ioc.get("technique_confirmed", "")).upper()
         for ioc in enriched_iocs
         if ioc.get("technique_confirmed")
     ]
+    impact_techniques = {"T1485", "T1486", "T1489", "T1490", "T1491", "T1498", "T1529", "T1531", "T1561"}
+    unverified_impact_techniques = sorted(
+        {technique for technique in technique_ids if technique in impact_techniques}
+        if not impact_confirmed else set()
+    )
+    if unverified_impact_techniques:
+        technique_ids = [technique for technique in technique_ids if technique not in impact_techniques]
+    assessment_iocs = [
+        ioc for ioc in enriched_iocs
+        if str(ioc.get("technique_confirmed", "")).upper() not in unverified_impact_techniques
+    ]
+    grouped_by_ip: dict[str, list[dict]] = defaultdict(list)
+    for ioc in assessment_iocs:
+        grouped_by_ip[str(ioc.get("source_ip", "Unknown"))].append(ioc)
+    timeline = sorted(
+        assessment_iocs,
+        key=lambda ioc: raw_by_id.get(str(ioc.get("alert_id")), {}).get("timestamp", ""),
+    )
+
+    compromise_confirmed = _compromise_confirmed(raw_alerts, assessment_iocs)
+    most_common_source_ip = _most_common([str(ioc.get("source_ip", "")) for ioc in assessment_iocs])
+    attack_type = _attack_type(raw_alerts, assessment_iocs, most_common_source_ip, compromise_confirmed)
     stage, kill_chain_position, stage_reasoning, observed_tactics = _derive_stage_from_tactics(technique_ids, mitre_context)
-    if compromise_confirmed:
-        stage = "Impact" if kill_chain_position >= 7 else stage
-        kill_chain_position = max(kill_chain_position, 7) if compromise_confirmed else kill_chain_position
-        if kill_chain_position >= 7 and stage != "Impact":
-            stage = "Impact"
-        if kill_chain_position >= 7 and "Impact" not in stage_reasoning:
+    if impact_confirmed:
+        if kill_chain_position < 7:
+            kill_chain_position = 7
+        stage = "Impact"
+        if "Impact" not in stage_reasoning:
             stage_reasoning = _stage_reasoning(
                 [str(tactic).lower() for tactic in observed_tactics],
                 stage,
@@ -518,7 +619,7 @@ def correlation_node(state: ThreatIntelState) -> dict:
             "No persistence, privilege escalation, or later-stage activity was confirmed."
         )
 
-    confidence_scores = [float(ioc.get("confidence", 0.0)) for ioc in enriched_iocs]
+    confidence_scores = [float(ioc.get("confidence", 0.0)) for ioc in assessment_iocs]
     campaign_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.0
     if any(len(items) > 1 for items in grouped_by_ip.values()):
         campaign_confidence += 0.10
@@ -527,10 +628,10 @@ def correlation_node(state: ThreatIntelState) -> dict:
 
     actor_counts = Counter(
         str(ioc.get("actor_name", "Unknown"))
-        for ioc in enriched_iocs
+        for ioc in assessment_iocs
         if str(ioc.get("actor_name", "Unknown")).strip()
     )
-    actor, actor_scores = _weighted_actor_selection(enriched_iocs, grouped_by_ip, mitre_context)
+    actor, actor_scores = _weighted_actor_selection(assessment_iocs, grouped_by_ip, mitre_context)
     known_actor_count = len(
         {
             actor_name
@@ -557,8 +658,9 @@ def correlation_node(state: ThreatIntelState) -> dict:
     techniques = sorted(
         {
             str(ioc.get("technique_confirmed", "")).upper()
-            for ioc in enriched_iocs
+            for ioc in assessment_iocs
             if ioc.get("technique_confirmed")
+            and str(ioc.get("technique_confirmed", "")).upper() not in unverified_impact_techniques
         }
     )
     campaign = {
@@ -572,12 +674,16 @@ def correlation_node(state: ThreatIntelState) -> dict:
         "confirmed_tactics": observed_tactics,
         "stage_reasoning": stage_reasoning,
         "techniques_confirmed": techniques,
-        "alerts_count": len(enriched_iocs),
+        "alerts_count": len(assessment_iocs),
         "attack_start": min(parsed_timestamps).isoformat().replace("+00:00", "Z") if parsed_timestamps else min(timestamps) if timestamps else "",
         "attack_latest": max(parsed_timestamps).isoformat().replace("+00:00", "Z") if parsed_timestamps else max(timestamps) if timestamps else "",
         "campaign_confidence": campaign_confidence,
         "target_asset": _most_common([str(alert.get("destination", "")) for alert in raw_alerts]),
         "actor_scores": actor_scores,
+        "compromise_confirmed": compromise_confirmed,
+        "impact_confirmed": impact_confirmed,
+        "unverified_impact_techniques": unverified_impact_techniques,
+        "cross_source_correlations": _cross_source_ssh_links(raw_alerts),
         **scope_metadata,
     }
     if known_actor_count > 1:

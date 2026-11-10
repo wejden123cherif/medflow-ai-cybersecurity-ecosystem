@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ ALERT_FILE = ROOT_DIR / "data" / "simulated_alerts" / "ryuk_scenario.json"
 DEFAULT_MAX_LIVE_ALERTS_PER_INVESTIGATION = 100
 MAX_LIVE_ALERTS_PER_INVESTIGATION = 1000
 DEFAULT_MAX_LIVE_EVENT_AGE_DAYS = 365
+SSH_LAB_FRESHNESS_HOURS = 24
+SSH_LAB_TARGET_HOST = os.getenv("MEDFLOW_SSH_LAB_TARGET_HOST", "medflow-ssh-target").strip()
+SSH_LAB_TARGET_PORT = 2222
 
 
 def _max_live_alerts_per_investigation() -> int:
@@ -81,6 +85,79 @@ def _bound_live_alert_batch(
     return ordered[:limit], max(0, len(ordered) - limit), stale_count
 
 
+def _ssh_lab_event_timestamp(alert: dict[str, Any]) -> datetime | None:
+    """Use sensor event time, not Indexer receipt time, for SSH lab freshness."""
+    source = str(alert.get("source_type") or "").lower()
+    if source == "suricata":
+        value = alert.get("source_event_timestamp")
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return None
+    if source == "wazuh":
+        evidence = alert.get("evidence") if isinstance(alert.get("evidence"), dict) else {}
+        predecoder = evidence.get("predecoder") if isinstance(evidence.get("predecoder"), dict) else {}
+        value = alert.get("source_log_timestamp") or predecoder.get("timestamp")
+        index_timestamp = alert.get("indexed_timestamp") or alert.get("source_event_timestamp")
+        try:
+            year = datetime.fromisoformat(str(index_timestamp).replace("Z", "+00:00")).year
+            # Wazuh's syslog predecoder omits year and timezone. The lab
+            # manager and Suricata host use UTC; mark this assumption in output.
+            parsed = datetime.strptime(f"{year} {value}", "%Y %b %d %H:%M:%S")
+            return parsed.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _select_fresh_ssh_lab_alerts(
+    alerts: list[dict[str, Any]], *, now_utc: datetime | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    now_utc = now_utc.astimezone(timezone.utc)
+    cutoff = now_utc - timedelta(hours=SSH_LAB_FRESHNESS_HOURS)
+    selected: list[dict[str, Any]] = []
+    rejected = 0
+    for alert in alerts:
+        source = str(alert.get("source_type") or "").lower()
+        evidence = alert.get("evidence") if isinstance(alert.get("evidence"), dict) else {}
+        rule_id = str(alert.get("wazuh_rule_id") or alert.get("rule_id") or "")
+        groups = alert.get("wazuh_rule_groups") or []
+        if not groups:
+            rule = evidence.get("rule") if isinstance(evidence.get("rule"), dict) else {}
+            groups = rule.get("groups") or []
+        if isinstance(groups, str):
+            groups = [groups]
+        if source == "wazuh":
+            predecoder = evidence.get("predecoder") if isinstance(evidence.get("predecoder"), dict) else {}
+            target_host = str(alert.get("target_host") or predecoder.get("hostname") or "").strip().lower()
+            qualifies = (
+                rule_id == "5760"
+                and "authentication_failed" in {str(x).lower() for x in groups}
+                and target_host == SSH_LAB_TARGET_HOST.lower()
+            )
+        elif source == "suricata":
+            try:
+                target_port = int(alert.get("target_port") or evidence.get("dest_port"))
+            except (TypeError, ValueError):
+                target_port = None
+            qualifies = (
+                str(alert.get("suricata_signature_id") or "") == "9900003"
+                and target_port == SSH_LAB_TARGET_PORT
+            )
+        else:
+            qualifies = False
+        timestamp = _ssh_lab_event_timestamp(alert) if qualifies else None
+        if not qualifies or timestamp is None or timestamp < cutoff or timestamp > now_utc + timedelta(minutes=5):
+            rejected += 1
+            continue
+        selected.append(alert)
+    return selected, rejected
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -118,27 +195,34 @@ def _normalize_legacy_event(alert: dict[str, Any], *, source_type: str) -> dict[
     return validate_normalized_alert(normalized)
 
 
-def _collect_live_alerts() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+def _collect_live_alerts(*, isolated_checkpoints: bool = False) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     from collectors.suricata import SuricataCollector
     from collectors.wazuh import WazuhCollector
 
     all_alerts: list[dict[str, Any]] = []
     metadata: list[dict[str, Any]] = []
     failures: list[str] = []
-    for collector_type in (WazuhCollector, SuricataCollector):
-        collector = collector_type()
-        try:
-            alerts, source_meta = collector.collect()
-        except Exception:
-            alerts, source_meta = None, {"failure_code": "collector_unexpected_error"}
-        safe_meta = dict(source_meta) if isinstance(source_meta, dict) else {"failure_code": "invalid_collector_metadata"}
-        metadata.append(safe_meta)
-        if alerts:
-            all_alerts.extend(alerts)
-        elif alerts is None:
-            source = getattr(collector_type, "name", collector_type.__name__.replace("Collector", "").lower())
-            code = safe_meta.get("failure_code", "collection_failed")
-            failures.append(f"{source}:{code}")
+    from contextlib import nullcontext
+    checkpoint_context = tempfile.TemporaryDirectory(prefix="medflow-ssh-lab-checkpoint-") if isolated_checkpoints else nullcontext(None)
+    with checkpoint_context as checkpoint_root:
+        for collector_type in (WazuhCollector, SuricataCollector):
+            if checkpoint_root:
+                source_name = getattr(collector_type, "name", collector_type.__name__.replace("Collector", "").lower())
+                collector = collector_type(checkpoint_path=Path(checkpoint_root) / f"{source_name}.json")
+            else:
+                collector = collector_type()
+            try:
+                alerts, source_meta = collector.collect()
+            except Exception:
+                alerts, source_meta = None, {"failure_code": "collector_unexpected_error"}
+            safe_meta = dict(source_meta) if isinstance(source_meta, dict) else {"failure_code": "invalid_collector_metadata"}
+            metadata.append(safe_meta)
+            if alerts:
+                all_alerts.extend(alerts)
+            elif alerts is None:
+                source = getattr(collector_type, "name", collector_type.__name__.replace("Collector", "").lower())
+                code = safe_meta.get("failure_code", "collection_failed")
+                failures.append(f"{source}:{code}")
     return all_alerts, metadata, failures
 
 
@@ -158,8 +242,11 @@ def collection_node(state: ThreatIntelState) -> dict[str, Any]:
     live_events: list[dict[str, Any]] = []
     collector_metadata: list[dict[str, Any]] = []
     failures: list[str] = []
-    if scenario == "live":
-        live_events, collector_metadata, failures = _collect_live_alerts()
+    if scenario in {"live", "ssh_lab"}:
+        if scenario == "ssh_lab":
+            live_events, collector_metadata, failures = _collect_live_alerts(isolated_checkpoints=True)
+        else:
+            live_events, collector_metadata, failures = _collect_live_alerts()
 
     parsed_alerts: list[dict[str, Any]] = []
     if live_events:
@@ -185,6 +272,9 @@ def collection_node(state: ThreatIntelState) -> dict[str, Any]:
         selected_event_count = len(parsed_alerts)
         deferred_event_count = 0
         stale_event_count = 0
+        ssh_lab_rejected_count = 0
+        if scenario == "ssh_lab":
+            parsed_alerts, ssh_lab_rejected_count = _select_fresh_ssh_lab_alerts(parsed_alerts)
         if parsed_alerts:
             parsed_alerts, deferred_event_count, stale_event_count = _bound_live_alert_batch(parsed_alerts)
         if stale_event_count:
@@ -209,8 +299,14 @@ def collection_node(state: ThreatIntelState) -> dict[str, Any]:
                 "duplicate_event_count": duplicates,
                 "available_event_count": selected_event_count,
                 "selected_event_count": len(parsed_alerts),
+                "ssh_lab_selected_event_count": len(parsed_alerts) if scenario == "ssh_lab" else None,
                 "deferred_event_count": deferred_event_count,
                 "stale_event_count": stale_event_count,
+                "ssh_lab_rejected_event_count": ssh_lab_rejected_count,
+                "freshness_window_hours": SSH_LAB_FRESHNESS_HOURS if scenario == "ssh_lab" else None,
+                "notifications_disabled": scenario == "ssh_lab",
+                "preserve_checkpoints": scenario == "ssh_lab",
+                "wazuh_source_timezone_assumption": "UTC (syslog predecoder omits timezone)" if scenario == "ssh_lab" else None,
             }
             errors.extend(f"[Collection] {item}" for item in failures)
             source = source_label
@@ -226,6 +322,23 @@ def collection_node(state: ThreatIntelState) -> dict[str, Any]:
         source = "simulated"
 
     if not live_alerts:
+        if scenario == "ssh_lab":
+            errors.append("[Collection] No fresh Wazuh rule 5760 or Suricata SID 9900003 evidence found; SSH lab mode fails closed without simulated fallback.")
+            collection_metadata = {
+                "scenario": scenario,
+                "data_source": "ssh_lab_live_empty",
+                "source_systems": [],
+                "collector_metadata": collector_metadata,
+                "notifications_disabled": True,
+                "preserve_checkpoints": True,
+                "fallback_disabled": True,
+            }
+            return {
+                "raw_alerts": [], "live_alerts": [], "simulated_alerts": [],
+                "collection_metadata": collection_metadata, "errors": errors,
+                "audit_log": audit_log, "source": "ssh_lab_live_empty", "schema_version": "1.0.0",
+            }
+
         if scenario == "live":
             fallback_reason = " | ".join(failures) if failures else "no_live_alerts"
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

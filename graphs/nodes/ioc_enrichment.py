@@ -507,6 +507,11 @@ def _evidence_status(alert: dict) -> str:
         for field in ("event_type", "rule_description", "decoder", "raw_log", "full_log")
     ).lower()
     groups = {str(group).lower() for group in (alert.get("rule_groups") or [])}
+    if (
+        str(alert.get("source_type") or alert.get("source_system") or "").lower() == "suricata"
+        and str(alert.get("suricata_signature_id") or "") == "9900003"
+    ):
+        return "attempted"
     if "authentication_failed" in groups or any(
         token in text
         for token in (
@@ -671,6 +676,15 @@ def _candidate_technique(alert: dict, raw_alerts: list[dict] | None = None) -> t
     """
     from rag.similarity_search import similarity_search
     from config import ATTACK_DB_DIR
+
+    # This lab SID is a local threshold rule for repeated SSH connection
+    # attempts. It supports an attempted credential-access association, but
+    # does not prove an authentication failure or successful access.
+    if (
+        str(alert.get("source_type") or alert.get("source_system") or "").lower() == "suricata"
+        and str(alert.get("suricata_signature_id") or "") == "9900003"
+    ):
+        return "T1110", 0.75
 
     if _is_benign_windows_service_message(alert):
         return "", 0.0
@@ -989,7 +1003,12 @@ Respond with ONLY valid JSON in this exact schema:
                 "alert_id": alert["id"],
                 "source_ip": alert["source_ip"],
                 "technique_confirmed": candidate_technique,
-                "technique_source": "provided_hint" if _usable_technique_hint(alert) else "inferred_from_wazuh",
+                "technique_source": (
+                    "rule_policy_inference"
+                    if str(alert.get("source_type") or "").lower() == "suricata"
+                    and str(alert.get("suricata_signature_id") or "") == "9900003"
+                    else "provided_hint" if _usable_technique_hint(alert) else "inferred_from_wazuh"
+                ),
                 "evidence_status": _evidence_status(alert),
                 "actor_name": actor_name,
                 "malware_associated": malware_associated,

@@ -35,7 +35,7 @@ class CollectorError(RuntimeError):
 class WazuhCollector(BaseCollector):
     name = "wazuh"
 
-    def __init__(self) -> None:
+    def __init__(self, *, checkpoint_path: str | Path | None = None) -> None:
         self.url = os.getenv("WAZUH_URL", "").strip().rstrip("/")
         self.indexer_url = os.getenv("WAZUH_INDEXER_URL", "").strip().rstrip("/")
         self.user = os.getenv("WAZUH_USER", "").strip()
@@ -59,7 +59,7 @@ class WazuhCollector(BaseCollector):
         self.retries = _bounded_int("WAZUH_MAX_RETRIES", 2, 0, 5)
         self.lookback_days = _bounded_int("WAZUH_LOOKBACK_DAYS", DEFAULT_WAZUH_LOOKBACK_DAYS, 1, 365)
         self.alerts_path = os.getenv("WAZUH_ALERTS_PATH", "/alerts").strip() or "/alerts"
-        self.checkpoint_path = Path(os.getenv(
+        self.checkpoint_path = Path(checkpoint_path or os.getenv(
             "WAZUH_CHECKPOINT_PATH", str(ROOT_DIR / "data" / "collector-checkpoints" / "wazuh.json")
         )).expanduser()
 
@@ -322,6 +322,9 @@ class WazuhCollector(BaseCollector):
             manager = alert.get("manager") or {}
             if not isinstance(manager, dict):
                 manager = {}
+            predecoder = alert.get("predecoder") or {}
+            if not isinstance(predecoder, dict):
+                predecoder = {}
             sensor = manager.get("name") or agent.get("name")
             rule_id = rule.get("id") or alert.get("rule_id")
             raw_log = alert.get("full_log") or alert.get("raw_log")
@@ -334,6 +337,12 @@ class WazuhCollector(BaseCollector):
                 "wazuh_rule_level": level,
                 "wazuh_rule_groups": rule.get("groups", alert.get("rule_groups", [])),
                 "technique_hint": (mitre_ids[0] if mitre_ids else "unknown"),
+                "source_log_timestamp": predecoder.get("timestamp"),
+                "indexed_timestamp": timestamp,
+                "target_host": predecoder.get("hostname") or agent.get("name"),
+                "destination_user": data.get("dstuser") or data.get("user"),
+                "source_port": data.get("srcport") or data.get("src_port"),
+                "target_ip": data.get("dstip") or data.get("dst_ip"),
                 "risk_score": min(100, max(0, level_for_map * 6)),
                 "risk_priority": _wazuh_priority(level_for_map),
             }

@@ -196,6 +196,9 @@ def run_investigation(
     """
     with_approval = with_approval or with_execution
     with_response = with_response or with_approval
+    # The isolated SSH evidence-only scenario never authorizes live execution,
+    # even when a caller accidentally sets with_execution=True.
+    effective_with_execution = with_execution and scenario != "ssh_lab"
 
     workflow = StateGraph(IncidentState)
     workflow.add_node("collection", collection_node)
@@ -236,6 +239,6 @@ def run_investigation(
         workflow.add_edge("persist_incident", END)
 
     app = workflow.compile()
-    state = app.invoke(_initial_state(scenario, scenario_file=scenario_file, with_execution=with_execution))
+    state = app.invoke(_initial_state(scenario, scenario_file=scenario_file, with_execution=effective_with_execution))
     handoff = InvestigationHandoff.from_state(state)
     return InvestigationResult(handoff=handoff, investigation_state=state)

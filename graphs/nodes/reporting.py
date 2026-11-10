@@ -91,11 +91,16 @@ def _strip_source_leakage(text: str) -> str:
 
 def _confirmed_technique_ids(state: ThreatIntelState) -> list[str]:
     scoped_alert_ids = set(state.get("campaign", {}).get("correlated_alert_ids") or [])
+    unverified_impact = {
+        str(value).upper()
+        for value in state.get("campaign", {}).get("unverified_impact_techniques", [])
+    }
     return sorted(
         {
             str(ioc.get("technique_confirmed", "")).upper()
             for ioc in state.get("enriched_iocs", [])
             if ioc.get("technique_confirmed")
+            and str(ioc.get("technique_confirmed", "")).upper() not in unverified_impact
             and (not scoped_alert_ids or str(ioc.get("alert_id", "")) in scoped_alert_ids)
         }
     )
@@ -132,14 +137,16 @@ def _stage_summary(campaign: dict, confidence_score: float) -> str:
     confidence_text = "high" if confidence_score >= 0.7 else "medium" if confidence_score >= 0.4 else "low"
     return (
         f"Observed Activity: evidence currently supports {tactic_text.lower()} activity.\n"
-        f"Confirmed ATT&CK Tactic: {stage}\n"
+        f"ATT&CK Tactic Association: {stage}\n"
         f"Assessment: {reasoning or 'Evidence supports the observed tactic only.'}\n"
         f"Confidence: {confidence_text}"
     )
 
 
 def _timeline(state: ThreatIntelState) -> list[dict]:
-    scoped_alert_ids = set(state.get("campaign", {}).get("correlated_alert_ids") or [])
+    campaign = state.get("campaign", {})
+    scoped_alert_ids = set(campaign.get("correlated_alert_ids") or [])
+    unverified_impact = {str(value).upper() for value in campaign.get("unverified_impact_techniques", [])}
     iocs_by_alert = {
         str(ioc.get("alert_id", "")): ioc
         for ioc in state.get("enriched_iocs", [])
@@ -150,21 +157,44 @@ def _timeline(state: ThreatIntelState) -> list[dict]:
     for alert in sorted(state.get("raw_alerts", []), key=lambda item: item.get("timestamp", "")):
         if scoped_alert_ids and str(alert.get("id", "")) not in scoped_alert_ids:
             continue
-        dedup_key = (str(alert.get("timestamp", "")), str(alert.get("event_type", "")))
+        event_id = str(alert.get("event_id") or alert.get("id") or "")
+        dedup_key = (event_id,) if event_id else (str(alert.get("timestamp", "")), str(alert.get("event_type", "")))
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
         ioc = iocs_by_alert.get(str(alert.get("id", "")), {})
         technique = str(ioc.get("technique_confirmed", "")).strip() or "none confirmed"
+        evidence_status = str(ioc.get("evidence_status") or "uncertain")
+        if technique.upper() in unverified_impact:
+            technique = f"unverified candidate {technique}"
+            evidence_status = "unverified_impact_label"
+        source_time = alert.get("source_log_timestamp")
+        evidence = alert.get("evidence") if isinstance(alert.get("evidence"), dict) else {}
+        predecoder = evidence.get("predecoder") if isinstance(evidence.get("predecoder"), dict) else {}
+        data = evidence.get("data") if isinstance(evidence.get("data"), dict) else {}
+        source_time = source_time or predecoder.get("timestamp")
+        if str(alert.get("source_type", "")).lower() == "wazuh" and source_time:
+            display_timestamp = f"{source_time} (Wazuh syslog time; year/timezone unavailable)"
+        else:
+            display_timestamp = alert.get("source_event_timestamp") or alert.get("timestamp", "")
+        source_port = alert.get("source_port") or data.get("srcport") or evidence.get("src_port")
+        target_context = (
+            f"{alert.get('target_ip')}:{alert.get('target_port')}"
+            if alert.get("target_ip") and alert.get("target_port")
+            else alert.get("target_ip") or predecoder.get("hostname") or alert.get("destination", "")
+        )
         rows.append(
             {
-                "timestamp": alert.get("timestamp", ""),
-                "alert_id": alert.get("id", ""),
+                "timestamp": display_timestamp,
+                "alert_id": event_id,
                 "source_ip": alert.get("source_ip", ""),
-                "destination": alert.get("destination", ""),
+                "source_port": source_port or "",
+                "destination": target_context,
+                "destination_user": alert.get("destination_user") or data.get("dstuser") or data.get("user") or "",
+                "source_sensor": alert.get("source_sensor") or alert.get("agent_name") or alert.get("source_type", "unknown"),
                 "event_type": alert.get("event_type", ""),
                 "technique": technique,
-                "evidence_status": str(ioc.get("evidence_status") or "uncertain"),
+                "evidence_status": evidence_status,
                 "actor": ioc.get("actor_name", "Unknown"),
                 "confidence": ioc.get("confidence", 0.0),
                 "actor_confidence": ioc.get("actor_confidence"),
@@ -195,7 +225,9 @@ def _format_attack_timeline_section(state: ThreatIntelState) -> str:
         else:
             risk_label = f"{int(row.get('risk_score') or 0)}/{row.get('risk_priority') or 'unknown'}"
         lines.append(
-            f"- {row['timestamp']} | {row['source_ip']} -> {row['destination']} | "
+            f"- {row['timestamp']} | {row['source_sensor']} {row['alert_id']} | "
+            f"{row['source_ip']}{':' + str(row['source_port']) if row['source_port'] else ''} -> {row['destination']} | "
+            f"user={row['destination_user'] or 'not present'} | "
             f"{row['event_type']} | {row['technique']} | evidence_status={row['evidence_status']} | actor={row['actor']} | "
             f"technique_confidence={float(row['confidence']):.0%} | "
             f"actor_confidence={float(row['actor_confidence'] or 0.0):.0%} | "
@@ -207,10 +239,12 @@ def _format_attack_timeline_section(state: ThreatIntelState) -> str:
 def _format_threat_assessment_section(state: ThreatIntelState) -> str:
     campaign = state.get("campaign", {})
     confidence_score = float(state.get("confidence_score", 0.0) or 0.0)
+    unverified_impact = {str(value).upper() for value in campaign.get("unverified_impact_techniques", [])}
     techniques = campaign.get("techniques_confirmed") or _confirmed_technique_ids(state)
     actor_counts = Counter(
         str(ioc.get("actor_name", "Unknown"))
         for ioc in state.get("enriched_iocs", [])
+        if str(ioc.get("technique_confirmed", "")).upper() not in unverified_impact
         if not set(campaign.get("correlated_alert_ids") or [])
         or str(ioc.get("alert_id", "")) in set(campaign.get("correlated_alert_ids") or [])
     )
@@ -219,6 +253,7 @@ def _format_threat_assessment_section(state: ThreatIntelState) -> str:
         f"{ioc.get('actor_name', 'Unknown')}: {float(ioc.get('actor_confidence', 0.0) or 0.0):.0%}"
         for ioc in state.get("enriched_iocs", [])
         if ioc.get("actor_name")
+        and str(ioc.get("technique_confirmed", "")).upper() not in unverified_impact
         and (
             not set(campaign.get("correlated_alert_ids") or [])
             or str(ioc.get("alert_id", "")) in set(campaign.get("correlated_alert_ids") or [])
@@ -248,6 +283,22 @@ def _format_threat_assessment_section(state: ThreatIntelState) -> str:
         ) or ["uncertain"]
         technique_lines[index] += f"; evidence_status={', '.join(statuses)}"
     technique_block = "\n".join(technique_lines) if technique_lines else "- None confirmed"
+    cross_source_links = campaign.get("cross_source_correlations") or []
+    if cross_source_links:
+        link_lines = [
+            "Cross-source SSH correlations (attempt evidence, not proof of access):"
+        ]
+        for link in cross_source_links:
+            link_lines.append(
+                f"- Wazuh {link.get('wazuh_event_id')} (rule {link.get('wazuh_rule_id')}) "
+                f"<-> Suricata {link.get('suricata_event_id')} (SID {link.get('suricata_signature_id')}); "
+                f"source {link.get('source_ip')}:{link.get('source_port')}, "
+                f"event second {link.get('event_second')}, "
+                f"target {link.get('wazuh_target_host')} / "
+                f"{link.get('suricata_target_ip')}:{link.get('suricata_target_port')}. "
+                f"Association rule: {link.get('rule')}. {link.get('assessment')}"
+            )
+        technique_block += "\n" + "\n".join(link_lines)
     return (
         f"ATT&CK techniques and evidence status:\n{technique_block}\n"
         f"Attributed actor: {actor} (campaign confidence {campaign_confidence:.0%}).\n"
@@ -282,6 +333,12 @@ def _format_current_attack_stage_section(state: ThreatIntelState) -> str:
         lines.append(
             "Evidence status: At least one event records attempted behavior; an attempt does not establish successful authentication or lateral movement."
         )
+    if campaign.get("attack_type") == "brute_force_attempt" and not campaign.get("compromise_confirmed"):
+        lines.append(
+            "Assessment: Attempted credential access only. No successful authentication or compromise is confirmed by the scoped evidence."
+        )
+        lines.append("Guidance: Preserve the authentication and network records and verify whether any successful login followed.")
+        return "\n".join(lines)
     if is_live and confidence_score < 0.5:
         lines.append(
             "Guidance: Validate the alert chain before declaring an active incident, but preserve evidence and review affected hosts."
@@ -372,6 +429,9 @@ def _build_condensed_summary(state: ThreatIntelState) -> dict:
     return {
         "data_source": collection_metadata.get("data_source", "unknown"),
         "attack_type": campaign.get("attack_type", "unknown"),
+        "compromise_confirmed": bool(campaign.get("compromise_confirmed", False)),
+        "impact_confirmed": bool(campaign.get("impact_confirmed", False)),
+        "unverified_impact_techniques": campaign.get("unverified_impact_techniques", []),
         "current_stage": _campaign_stage(campaign),
         "kill_chain_position": campaign.get("kill_chain_position"),
         "confirmed_technique_ids": confirmed_ids,
@@ -399,6 +459,7 @@ def _fallback_narrative(state: ThreatIntelState) -> dict[str, str]:
     campaign_confidence = float(campaign.get("campaign_confidence", 0.0) or 0.0)
     source_sentence = _source_summary(campaign, confidence_score)
     insufficient_evidence = confidence_score < 0.3 or stage == "Insufficient Evidence"
+    attempt_only = campaign.get("attack_type") == "brute_force_attempt" and not campaign.get("compromise_confirmed")
 
     executive_summary = (
         _stage_summary(campaign, confidence_score)
@@ -407,14 +468,19 @@ def _fallback_narrative(state: ThreatIntelState) -> dict[str, str]:
         f"with an enrichment confidence of {confidence_score:.0%}. "
         f"{source_sentence}"
         f"Attribution points most strongly to {actor}, with campaign confidence at {campaign_confidence:.0%}. "
-        f"Confirmed techniques in scope: {techniques}."
+        f"ATT&CK technique mappings in scope: {techniques}."
     )
     if is_live and confidence_score < 0.5:
         executive_summary += (
             " Because this is low-confidence live telemetry, treat this as triage evidence rather than a confirmed campaign."
         )
 
-    if insufficient_evidence:
+    if attempt_only:
+        healthcare_impact = (
+            "No confirmed patient-care, system-impact, data-loss, or PHI-exposure evidence appears in the scoped alerts. "
+            "The observed evidence is limited to attempted credential access and repeated SSH connections."
+        )
+    elif insufficient_evidence:
         healthcare_impact = (
             "No specific healthcare-impact scenario can be projected because there is insufficient confirmed evidence. "
             "Continue triage and evidence preservation before assessing patient-care, HIPAA, or operational impact."
@@ -441,7 +507,11 @@ def _build_narrative_prompt(state: ThreatIntelState) -> str:
     current_stage = _campaign_stage(campaign)
     confirmed_technique_ids = _confirmed_technique_ids(state)
     insufficient_evidence = confidence_score < 0.3 or current_stage == "Insufficient Evidence"
-    can_project_healthcare_impact = confidence_score >= 0.5 and bool(confirmed_technique_ids)
+    can_project_healthcare_impact = (
+        confidence_score >= 0.5
+        and bool(confirmed_technique_ids)
+        and bool(campaign.get("compromise_confirmed") or campaign.get("impact_confirmed"))
+    )
 
     caution = ""
     if is_live:
@@ -452,7 +522,11 @@ def _build_narrative_prompt(state: ThreatIntelState) -> str:
     elif float(campaign.get("campaign_confidence", 0.0) or 0.0) < 0.6:
         caution = "Treat this as provisional analysis rather than a confirmed campaign."
 
-    if insufficient_evidence:
+    if campaign.get("attack_type") == "brute_force_attempt" and not campaign.get("compromise_confirmed"):
+        healthcare_instruction = (
+            "State that no clinical, data, or PHI impact is confirmed in the scoped alerts; describe only attempted credential access."
+        )
+    elif insufficient_evidence:
         healthcare_instruction = (
             "Write HEALTHCARE IMPACT as a brief statement that no specific healthcare-impact scenario can be projected "
             "given insufficient confirmed evidence."
@@ -480,9 +554,11 @@ Requirements:
 1. EXECUTIVE SUMMARY â€” 3-4 sentences, non-technical, suitable for hospital leadership.
 2. HEALTHCARE IMPACT â€” 2-4 sentences on patient care, HIPAA, and operational risk.
 
-Use the exact current_stage and confirmed_technique_ids from the summary. Do not contradict them.
+Use the exact current_stage and technique IDs from the summary. Do not contradict them. Label analytical conclusions as assessments, and distinguish them from facts directly present in the source alerts.
 Our kill chain uses exactly 7 stages (1-7). Never use X/9.
 Do not claim data exfiltration or PHI exposure without explicit exfiltration evidence.
+Failed SSH authentication and repeated SSH connections are attempted credential access only. If compromise_confirmed is false, do not describe a confirmed compromise. If impact_confirmed is false, do not describe ransomware, encryption, or Impact-stage activity as observed; identify any unverified impact technique labels as hypotheses or exclusions.
+Do not state that containment or notification was executed unless execution audit evidence explicitly records it. Proposed actions are recommendations, not completed actions.
 {caution}
 {healthcare_instruction}
 

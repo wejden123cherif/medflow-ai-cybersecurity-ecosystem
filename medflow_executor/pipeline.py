@@ -34,7 +34,11 @@ def _state_from_handoff(handoff: InvestigationHandoff) -> dict[str, Any]:
     return state
 
 
-def run_execution(investigation_result: InvestigationResult | InvestigationHandoff | dict[str, Any]) -> ExecutionResult:
+def run_execution(
+    investigation_result: InvestigationResult | InvestigationHandoff | dict[str, Any],
+    *,
+    retry_notifications: bool = True,
+) -> ExecutionResult:
     """
     Run the Executor component from the serializable Investigator handoff.
 
@@ -42,8 +46,9 @@ def run_execution(investigation_result: InvestigationResult | InvestigationHando
     handoff dataclass directly or the JSON-decoded dict that would arrive over a
     future network boundary.
     """
-    from integrations.email.incident_dispatch import retry_pending_notifications
-    retry_pending_notifications()
+    if retry_notifications:
+        from integrations.email.incident_dispatch import retry_pending_notifications
+        retry_pending_notifications()
     handoff = _coerce_handoff(investigation_result)
     workflow = StateGraph(IncidentState)
     should_run_response_executor = bool(
