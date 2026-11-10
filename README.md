@@ -1,6 +1,10 @@
 # MedFlow AI Cybersecurity Ecosystem
 
-MedFlow AI is a Python SOC investigation prototype that normalizes security alerts, correlates evidence, enriches indicators with threat intelligence, creates an incident report, and prepares response recommendations. It connects to Wazuh and Suricata and can use MISP, local MITRE ATT&CK data, vector search, and Groq-hosted language models.
+**MedFlow AI is an AI-assisted cybersecurity investigation and incident-response prototype for digital healthcare.** It combines role-specialized security analysis, retrieval-augmented threat intelligence, and LangGraph orchestration to turn security telemetry into contextual investigations, attack-progression assessments, incident reports, and human-supervised response decisions.
+
+Security teams often receive more alerts than analysts can investigate individually. MedFlow AI is designed to reduce that workload by normalizing telemetry, retrieving relevant cybersecurity knowledge, enriching and correlating evidence, and assembling a reviewable incident assessment. Deterministic controls and source evidence constrain the workflow: model-generated reasoning is treated as analysis, not proof, and sensitive response actions remain subject to human approval.
+
+The project's primary focus is its coordinated AI investigation workflow. The SSH laboratory and simulated ransomware scenario are validation examples for parts of this broader ecosystem, not the system's identity.
 
 This repository is intended for development and authorized isolated-lab use. Detection, AI-assisted investigation, notification, and containment are separate stages. A detection is not proof of compromise; an AI hypothesis is not a confirmed fact; and a recommended response is not an executed response.
 
@@ -14,7 +18,7 @@ The following is the latest status reported for the lab. It is not a claim that 
 | Suricata SSH connection detection | **Verified** | Lab EVE evidence included SID `9900003`; it detects repeated SSH connections, not necessarily failed passwords. |
 | MedFlow access to both alert sources | **Partially verified** | Read-only local ingestion retrieved Wazuh alerts and Suricata signature `1:9900003:1`. The mounted EVE path was confirmed readable in `medflow-app`. |
 | FastAPI container startup and health | **Verified** | FastAPI and Uvicorn are declared dependencies; the container health endpoint returned healthy after the dependency repair. |
-| Live AI investigation and incident report | **Pending end-to-end verification** | The investigation workflow and report code are present. Do not infer successful live investigation from unit tests or source ingestion alone. |
+| Live AI investigation and incident report | **Partially verified** | A six-event Wazuh/Suricata lab preflight and source correlation evidence are saved. The combined investigation was blocked in the recorded validation run. A separate broader run and its dry-run action counts were reported by the operator, but its original output and action-level audit are unavailable for independent verification. |
 | SMTP email delivery | **Verified** | A real message was sent successfully through the configured MedFlow email connector. The incident dispatch path also applies severity, freshness, live-source, and allowlist checks. |
 | Actual containment | **Pending; not demonstrated** | The CLI is dry-run only. Disruptive response actions require a human decision. Do not report containment as executed based on a proposal or preview. |
 
@@ -44,6 +48,21 @@ flowchart LR
   PLAN --> APPROVAL[Human approval gate]
   APPROVAL --> EXEC[Executor: CLI dry-run]
 ```
+
+## Specialized AI agents and investigation roles
+
+The `agents/` package contains four role-specific interfaces over shared RAG retrieval and answer generation. They are specialized prompt-and-tooling roles, not four independent autonomous LangGraph workflows. The LangGraph investigator coordinates deterministic processing nodes and selected model-backed steps using a shared incident state.
+
+| Component | Purpose and knowledge source | Input and output |
+| --- | --- | --- |
+| CTI agent (`agents/cti_agent.py`) | Explains ATT&CK techniques and threat context, grounded in the local ATT&CK collection. | A question; returns an answer that separates retrieved technique IDs from claims outside retrieved context. |
+| Red-team agent (`agents/redteam_agent.py`) | Provides defensive, authorized-lab technique and kill-chain analysis from procedure-oriented ATT&CK records. | A question; returns bounded validation and mitigation guidance with source-grounding instructions. |
+| Attribution agent (`agents/attribution_agent.py`) | Compares TTP overlap and actor hypotheses using the actor-profile collection. | A question; returns cautious, evidence-labeled attribution analysis. |
+| Detection agent (`agents/detection_agent.py`) | Summarizes detection guidance, analytics, data sources, and mitigations from the detection collection. | A question; returns retrieval-grounded detection context and recommendations, or states that no matching context was found. |
+| IOC enrichment (`graphs/nodes/ioc_enrichment.py`) | Graph node that extracts/enriches indicators, maps supported evidence to ATT&CK, and can invoke a LangGraph ReAct agent with configured tools such as reputation, MISP, MITRE, and conditional CVE lookup. | Normalized alerts and shared state; returns enriched IOCs, evidence status, tool provenance, and errors/degraded-service notes. |
+| Prediction and reporting nodes | Use retrieved context and selected Groq calls for constrained progression analysis and report narrative; deterministic fallbacks remain available. | Correlated incident state; return prediction metadata and a structured report that should distinguish observed facts from hypotheses. |
+
+The benefit of specialization is separation of analytical tasks and retrieval domains while retaining common incident context. Role prompts request source-aware outputs; deterministic correlation, risk, and policy code still perform important parts of the workflow. LLM availability and quality depend on the configured provider, and semantic retrieval can return no evidence when the query is outside or poorly represented in the local corpus.
 
 ### Detection, investigation, and response
 
@@ -102,6 +121,24 @@ flowchart TD
 
 `with_response` adds planning after persistence. `with_approval` adds the approval node and ends at that gate; the separate `medflow_executor` graph consumes a serialized handoff and runs the executor/closure workflow. The documented CLI uses dry-run execution. Live containment is not verified and must not be inferred from an approved plan or execution preview.
 
+The graph is an orchestrated investigation workflow, not a claim that every stage is an independent AI agent:
+
+```mermaid
+flowchart LR
+  A[Wazuh and Suricata events] --> B[Collection and normalization]
+  B --> C[IOC enrichment and optional tool-using analysis]
+  C --> D[Local ATT&CK lookup]
+  D --> E[Correlation and evidence assessment]
+  E --> F[Prediction with RAG context]
+  F --> G[Incident report]
+  G --> H[Incident initialization and risk score]
+  H --> I[Playbook resolution]
+  I --> J[Persist incident and eligible notification outbox]
+  J --> K[Response plan]
+  K --> L[Human approval gate]
+  L --> M[Separate executor workflow: dry-run in documented CLI]
+```
+
 ## RAG and AI components
 
 RAG is a local retrieval pipeline over structured MITRE ATT&CK STIX-derived material, with optional Groq generation. It is not a general web search system and does not turn similarity into proof.
@@ -148,6 +185,19 @@ Evaluation assets document a 39-query labeled development/held-out set. The reco
 
 Treat sensor records as confirmed observations, correlation/attribution as analysis, and model-generated claims as hypotheses until supported by source evidence. Reports retain this distinction; they must not state that containment occurred unless execution and audit evidence confirm it.
 
+## Validation scenarios and evidence
+
+Validation is organized around capabilities rather than one detection demo. Results below distinguish checked retrieval/source behavior from the complete live incident workflow:
+
+| Phase | Capability | Current evidence and status |
+| --- | --- | --- |
+| 1. Retrieval and specialized roles | ATT&CK-derived collections, semantic search, role-specific Q&A, grounding and retrieval evaluation. | The repository includes a labeled evaluation dataset and published development/held-out results described above. These retrieval metrics do not establish incident-investigation accuracy. |
+| 2. Simulated campaign investigation | Ryuk fixture, ATT&CK context, stage reasoning, risk/reporting, and ransomware playbook resolution. | Scenario code, playbook, and offline tests are present. Treat fixture results as simulated; they are not live ransomware observations. |
+| 3. Multi-source lab telemetry | Isolated SSH activity observed by Wazuh and Suricata, normalized and matched across sources. | Saved preflight evidence contains five Wazuh rule `5760` events and one Suricata SID `9900003` event. One pair shares source IP, source port, event second, and target context. This validates source acquisition/correlation evidence, not the entire investigation workflow. |
+| 4. End-to-end SSH investigation and response planning | Enrichment, ATT&CK mapping, campaign assessment, report, playbook, approval, and dry-run action handling. | The saved validation matrix records the combined investigation as **blocked** and notifications/executor as **not run**. A separate run summary was reported with six relevant alerts, ATT&CK `T1110`/`T1110.001`, Credential Access, risk `73/100`, six planned actions, three successful dry-run simulations, two rejected actions skipped, and one unsupported `MONITOR_ACCOUNT` handler. Its original console output and action-level audit are not available in the evidence folder, so these figures remain **operator-reported, not independently verified here**. Do not present this phase as a verified successful end-to-end run until its artifacts are captured and reviewed. |
+
+The cross-source records establish an attempted SSH authentication event, not a successful login or compromise. The Wazuh predecoder timestamp omits a timezone; timestamp matching should be interpreted alongside the matching source IP, source port, destination, and target context. The Suricata SID describes network connection behavior and does not itself prove password failure.
+
 ## Repository map
 
 ```text
@@ -162,13 +212,13 @@ medflow_investigator/      Collection through persistence and optional approval 
 medflow_executor/          Executor workflow and response-action handling
 models/                    Alert/incident models and SQLite persistence/outbox
 playbooks/                 YAML response playbooks and action vocabulary
-rag/                       Retrieval pipeline and RAG evaluation assets
+rag/                       Structured ATT&CK RAG pipeline, retrieval, and evaluation assets
 scripts/                   Setup, build, audit, and explicitly gated verification tools
 suricata/                  Suricata image, rules, and sensor configuration
 tests/                     Offline unit tests and opt-in external/integration tests
 wazuh/                     Manager configuration and integration/active-response scripts
 api.py                     FastAPI health and webhook endpoints
-app.py                     CLI for status, retrieval, investigation, and handoff
+app.py                     CLI for status, agent Q&A, investigation, and handoff
 config.py                  Environment settings and local data paths
 docker-compose.yml         Root Compose application/supporting-service definitions
 requirements.txt           Python runtime dependencies
