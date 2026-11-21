@@ -174,6 +174,8 @@ The shared query pipeline creates query variants, searches the relevant Chroma c
 
 Evaluation assets document a 39-query labeled development/held-out set. The recorded evaluation reports Recall@3 of 78.85% raw and 76.92% after thresholding, Precision@3 of 30.71% raw and 29.96% after thresholding, MRR of 75.84%, and rejection of 10/10 out-of-domain probes. These are dataset-specific retrieval metrics; the target recall was not met, and they do not measure operational incident accuracy.
 
+A previously reported **96.7% faster-triage** figure is not substantiated by the repository evidence. The evaluation measures retrieval ranking; it does not record analyst triage time, a comparison baseline, or a reproducible time study. Treat that figure as unverified, not as a measured project result or production outcome.
+
 ## Threat intelligence and evidence boundaries
 
 - **Wazuh** supplies collected endpoint and authentication alerts from its API/indexer. The collector uses configured credentials and strict TLS verification, with an explicitly trusted CA bundle supported for private deployments. Collection of `medflow-ssh-target` logs is not currently configured; its Docker log output is not itself an indexed Wazuh alert.
